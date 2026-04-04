@@ -17,6 +17,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { exercisesApi, sessionsApi, prescriptionsApi, type Exercise, type Prescription } from "@/lib/api"
 import { useApp } from "@/lib/app-context"
+import type { MovementState } from "@/hooks/use-shoulder-flexion-counter"
+
+const DEMO_DURATION_SECONDS = 10
 
 export default function PatientExercisePage() {
   const { selectedUserId, role } = useApp()
@@ -26,10 +29,21 @@ export default function PatientExercisePage() {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
   const [selectedExerciseId, setSelectedExerciseId] = useState<string>("")
   const [activePrescriptionId, setActivePrescriptionId] = useState<string | undefined>(undefined)
+
+  // Session lifecycle
   const [isActive, setIsActive] = useState(false)
+  const [isPreparing, setIsPreparing] = useState(false)
+  const [demoSecondsRemaining, setDemoSecondsRemaining] = useState(DEMO_DURATION_SECONDS)
+  const [sessionComplete, setSessionComplete] = useState(false)
+
+  // Live metrics — populated by onMetricsChange from WebcamFeed
   const [repCount, setRepCount] = useState(0)
   const [formQuality, setFormQuality] = useState<"good" | "bad" | "neutral">("neutral")
-  const [sessionComplete, setSessionComplete] = useState(false)
+  const [currentAngle, setCurrentAngle] = useState(0)
+  const [currentState, setCurrentState] = useState<MovementState>("DOWN")
+  const [activeSide, setActiveSide] = useState<"left" | "right">("left")
+
+  // Session save state
   const [duration, setDuration] = useState(0)
   const [startedAt, setStartedAt] = useState<string>("")
   const [sessionAccuracy, setSessionAccuracy] = useState(0)
@@ -38,7 +52,6 @@ export default function PatientExercisePage() {
   useEffect(() => {
     if (role !== "patient") {
       router.replace("/login")
-      return
     }
   }, [role, router])
 
@@ -53,7 +66,6 @@ export default function PatientExercisePage() {
       const activeRx = rx.filter((p) => p.status === "active")
       setPrescriptions(activeRx)
 
-      // Filter exercises to prescribed ones; fall back to full catalog if none prescribed
       const prescribedExerciseIds = new Set(
         activeRx.map((p) => p.exercise_id).filter(Boolean) as string[]
       )
@@ -73,31 +85,63 @@ export default function PatientExercisePage() {
     setActivePrescriptionId(rx?.id)
   }, [selectedExerciseId, prescriptions])
 
-  // Simulate reps / form / duration while session is active
+  // Demo countdown: tick down every second, then start real tracking
+  useEffect(() => {
+    if (!isPreparing) return
+    if (demoSecondsRemaining <= 0) {
+      setIsPreparing(false)
+      setIsActive(true)
+      return
+    }
+    const timer = setTimeout(() => {
+      setDemoSecondsRemaining((prev) => prev - 1)
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [isPreparing, demoSecondsRemaining])
+
+  // Duration timer — only while tracking is active
   useEffect(() => {
     if (!isActive) return
-    const repInterval = setInterval(() => setRepCount((prev) => prev + 1), 2500)
-    const formInterval = setInterval(() => {
-      const qualities: ("good" | "bad" | "neutral")[] = ["good", "good", "good", "bad"]
-      setFormQuality(qualities[Math.floor(Math.random() * qualities.length)])
-    }, 3000)
-    const durationInterval = setInterval(() => setDuration((prev) => prev + 1), 1000)
-    return () => {
-      clearInterval(repInterval)
-      clearInterval(formInterval)
-      clearInterval(durationInterval)
-    }
+    const interval = setInterval(() => setDuration((prev) => prev + 1), 1000)
+    return () => clearInterval(interval)
   }, [isActive])
+
+  // Callback wired to WebcamFeed — receives real metrics every frame
+  const handleMetricsChange = useCallback((metrics: {
+    repCount: number
+    currentAngle: number
+    currentState: MovementState
+    formQuality: "good" | "bad" | "neutral"
+    activeSide: "left" | "right"
+    calibrated: boolean
+    upThreshold: number
+    downThreshold: number
+  }) => {
+    setRepCount(metrics.repCount)
+    setFormQuality(metrics.formQuality)
+    setCurrentAngle(Math.round(metrics.currentAngle))
+    setCurrentState(metrics.currentState)
+    setActiveSide(metrics.activeSide)
+  }, [])
 
   const handleStart = useCallback(() => {
     setStartedAt(new Date().toISOString())
+    setIsPreparing(true)
+    setDemoSecondsRemaining(DEMO_DURATION_SECONDS)
+  }, [])
+
+  const handleSkipDemo = useCallback(() => {
+    setIsPreparing(false)
     setIsActive(true)
-    setFormQuality("neutral")
   }, [])
 
   const handleStop = useCallback(async () => {
     setIsActive(false)
-    const form_score = 0.85
+    // Derive form_score from real posture quality
+    const form_score =
+      formQuality === "good" ? 0.9 :
+      formQuality === "neutral" ? 0.7 :
+      0.5
     setSessionAccuracy(Math.round(form_score * 100))
 
     if (selectedUserId && selectedExerciseId && startedAt) {
@@ -118,12 +162,14 @@ export default function PatientExercisePage() {
       }
     }
     setSessionComplete(true)
-  }, [selectedUserId, selectedExerciseId, repCount, duration, startedAt, activePrescriptionId])
+  }, [selectedUserId, selectedExerciseId, repCount, duration, startedAt, activePrescriptionId, formQuality])
 
   const handleReset = useCallback(() => {
     setRepCount(0)
     setDuration(0)
     setFormQuality("neutral")
+    setCurrentAngle(0)
+    setCurrentState("DOWN")
     setSessionComplete(false)
     setStartedAt("")
     setFeedbackId(undefined)
@@ -132,6 +178,7 @@ export default function PatientExercisePage() {
   const handleNewSession = useCallback(() => {
     handleReset()
     setIsActive(false)
+    setIsPreparing(false)
   }, [handleReset])
 
   const selectedExercise = exercises.find((e) => e.id === selectedExerciseId)
@@ -165,7 +212,11 @@ export default function PatientExercisePage() {
             </p>
           </div>
           <div className="w-full sm:w-64">
-            <Select value={selectedExerciseId} onValueChange={setSelectedExerciseId}>
+            <Select
+              value={selectedExerciseId}
+              onValueChange={setSelectedExerciseId}
+              disabled={isActive || isPreparing}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select exercise" />
               </SelectTrigger>
@@ -203,24 +254,42 @@ export default function PatientExercisePage() {
           <div className="lg:col-span-2">
             <Card className="overflow-hidden">
               <CardContent className="p-0">
-                <WebcamFeed isActive={isActive} className="aspect-video" />
+                <WebcamFeed
+                  isActive={isActive}
+                  showDemo={isPreparing}
+                  demoSecondsRemaining={demoSecondsRemaining}
+                  demoExerciseName={selectedExercise?.name}
+                  demoInstructions={selectedExercise?.instructions}
+                  angleConfig={selectedExercise?.angle_config}
+                  onMetricsChange={handleMetricsChange}
+                  className="aspect-video"
+                />
               </CardContent>
             </Card>
 
-            {isActive && (
-              <div className="mt-4 flex items-center justify-center gap-6">
+            {/* Status bar — shown while demo or tracking */}
+            {(isActive || isPreparing) && (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                <StatusPill label="Duration">
+                  {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, "0")}
+                </StatusPill>
+                {isActive && (
+                  <>
+                    <StatusPill label="Angle">{currentAngle}deg</StatusPill>
+                    <StatusPill label="State">{currentState}</StatusPill>
+                    <StatusPill label="Side">
+                      {activeSide.charAt(0).toUpperCase() + activeSide.slice(1)}
+                    </StatusPill>
+                  </>
+                )}
                 <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-sm">
-                  <span className="text-sm text-muted-foreground">Duration:</span>
-                  <span className="font-mono text-lg font-semibold text-foreground">
-                    {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, "0")}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
                   <span className="relative flex h-3 w-3">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
                     <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
                   </span>
-                  <span className="text-sm font-medium text-accent">Recording</span>
+                  <span className="text-sm font-medium text-accent">
+                    {isPreparing ? "Demo" : "Recording"}
+                  </span>
                 </div>
               </div>
             )}
@@ -229,11 +298,14 @@ export default function PatientExercisePage() {
           <div>
             <ExerciseControls
               isActive={isActive}
+              isPreparing={isPreparing}
+              preparationSeconds={demoSecondsRemaining}
               repCount={repCount}
               formQuality={formQuality}
               onStart={handleStart}
               onStop={handleStop}
               onReset={handleReset}
+              onSkipDemo={handleSkipDemo}
             />
 
             {selectedExercise && (
@@ -255,5 +327,14 @@ export default function PatientExercisePage() {
         </div>
       </div>
     </AppLayout>
+  )
+}
+
+function StatusPill({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-sm">
+      <span className="text-sm text-muted-foreground">{label}:</span>
+      <span className="font-mono text-lg font-semibold text-foreground">{children}</span>
+    </div>
   )
 }
