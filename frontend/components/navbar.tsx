@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LayoutDashboard, Dumbbell, Gamepad2, BarChart3, Menu, X } from "lucide-react"
+import { LayoutDashboard, Dumbbell, Gamepad2, BarChart3, Mic, Menu, X } from "lucide-react"
 import { useState } from "react"
 import { useUser } from "@/lib/user-context"
 
@@ -21,6 +21,7 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Exercise", href: "/exercise", icon: Dumbbell },
   { name: "Games", href: "/games", icon: Gamepad2 },
+  { name: "Voice Tests", href: "/cognitive-tests", icon: Mic },
   { name: "Results", href: "/results", icon: BarChart3 },
 ]
 

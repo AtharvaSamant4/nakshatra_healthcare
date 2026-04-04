@@ -1,187 +1,291 @@
 -- ============================================================
--- AI Rehabilitation System — Supabase PostgreSQL Schema
--- ============================================================
--- Canonical SQL source. Run this in Supabase SQL Editor to
--- create all tables, indexes, and seed data.
---
--- Tables: users, exercises, exercise_sessions, game_sessions, ai_feedback
--- See context/schema.md for field-level documentation.
--- See context/api_contract.md for API shapes that map to these tables.
+-- Nakshatra Healthcare — Supabase PostgreSQL Schema (V2)
+-- Generated to match the CURRENT DB tables described by user.
+-- Date: 2026-04-04
 -- ============================================================
 
--- extensions
+-- Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- ============================================================
--- 1. users
--- ============================================================
-CREATE TABLE users (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  email text UNIQUE,
-  age int,
-  condition_notes text,
-  created_at timestamptz DEFAULT now()
-);
+-- Optional but common in Supabase:
+-- CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
--- 2. exercises  (pre-populated via seed INSERTs below)
+-- 1) staff
 -- ============================================================
-CREATE TABLE exercises (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS public.staff (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
   name text NOT NULL,
-  description text,
+  email text NULL,
+  role text NOT NULL,
+  specialization text NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT staff_pkey PRIMARY KEY (id),
+  CONSTRAINT staff_email_key UNIQUE (email)
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_staff_role
+  ON public.staff USING btree (role) TABLESPACE pg_default;
+
+-- ============================================================
+-- 2) patients
+-- (Your DB uses patients, not users)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.patients (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  email text NULL,
+  age integer NULL,
+  condition_notes text NULL,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  doctor_id uuid NULL,
+  status text NOT NULL DEFAULT 'registered'::text,
+  diagnosis text NULL,
+  injury_type text NULL,
+  severity text NULL,
+  emergency boolean NOT NULL DEFAULT false,
+  phone text NULL,
+  CONSTRAINT patients_pkey PRIMARY KEY (id),
+  CONSTRAINT patients_email_key UNIQUE (email),
+  CONSTRAINT patients_doctor_id_fkey FOREIGN KEY (doctor_id)
+    REFERENCES public.staff (id) ON DELETE SET NULL
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_patients_doctor
+  ON public.patients USING btree (doctor_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_patients_status
+  ON public.patients USING btree (status) TABLESPACE pg_default;
+
+-- ============================================================
+-- 3) exercises
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.exercises (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  description text NULL,
   body_part text NOT NULL,
-  difficulty text DEFAULT 'beginner',
+  difficulty text NULL DEFAULT 'beginner'::text,
   angle_config jsonb NOT NULL,
-  instructions text,
-  thumbnail_url text
-);
+  instructions text NULL,
+  thumbnail_url text NULL,
+  CONSTRAINT exercises_pkey PRIMARY KEY (id)
+) TABLESPACE pg_default;
 
 -- ============================================================
--- 3. exercise_sessions
+-- 4) prescriptions
 -- ============================================================
-CREATE TABLE exercise_sessions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  exercise_id uuid NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
-  reps_completed int NOT NULL,
-  avg_angle double precision,
-  min_angle double precision,
-  max_angle double precision,
-  form_score double precision,
-  duration_seconds int,
-  angle_history jsonb,
-  started_at timestamptz NOT NULL,
-  completed_at timestamptz NOT NULL
-);
+CREATE TABLE IF NOT EXISTS public.prescriptions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL,
+  doctor_id uuid NOT NULL,
+  exercise_id uuid NULL,
+  game_type text NULL,
+  target_reps integer NULL,
+  target_sets integer NULL,
+  frequency text NULL,
+  priority text NOT NULL DEFAULT 'normal'::text,
+  notes text NULL,
+  status text NOT NULL DEFAULT 'active'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT prescriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT prescriptions_patient_id_fkey FOREIGN KEY (patient_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE,
+  CONSTRAINT prescriptions_doctor_id_fkey FOREIGN KEY (doctor_id)
+    REFERENCES public.staff (id) ON DELETE CASCADE,
+  CONSTRAINT prescriptions_exercise_id_fkey FOREIGN KEY (exercise_id)
+    REFERENCES public.exercises (id) ON DELETE SET NULL
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_prescriptions_patient
+  ON public.prescriptions USING btree (patient_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_prescriptions_doctor
+  ON public.prescriptions USING btree (doctor_id) TABLESPACE pg_default;
 
 -- ============================================================
--- 4. game_sessions
+-- 5) exercise_sessions
+-- NOTE: Your DB includes prescription_id (nullable)
 -- ============================================================
-CREATE TABLE game_sessions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS public.exercise_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  exercise_id uuid NOT NULL,
+  reps_completed integer NOT NULL,
+  avg_angle double precision NULL,
+  min_angle double precision NULL,
+  max_angle double precision NULL,
+  form_score double precision NULL,
+  duration_seconds integer NULL,
+  angle_history jsonb NULL,
+  started_at timestamp with time zone NOT NULL,
+  completed_at timestamp with time zone NOT NULL,
+  prescription_id uuid NULL,
+  CONSTRAINT exercise_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT exercise_sessions_user_id_fkey FOREIGN KEY (user_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE,
+  CONSTRAINT exercise_sessions_exercise_id_fkey FOREIGN KEY (exercise_id)
+    REFERENCES public.exercises (id) ON DELETE CASCADE,
+  CONSTRAINT exercise_sessions_prescription_id_fkey FOREIGN KEY (prescription_id)
+    REFERENCES public.prescriptions (id) ON DELETE SET NULL
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_exercise_sessions_user
+  ON public.exercise_sessions USING btree (user_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_exercise_sessions_exercise
+  ON public.exercise_sessions USING btree (exercise_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_exercise_sessions_completed_at
+  ON public.exercise_sessions USING btree (completed_at DESC) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_exercise_sessions_prescription
+  ON public.exercise_sessions USING btree (prescription_id) TABLESPACE pg_default;
+
+-- ============================================================
+-- 6) game_sessions
+-- (Remove duplicates; define once)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.game_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
   game_type text NOT NULL,
-  score int NOT NULL,
-  accuracy double precision,
-  avg_reaction_ms double precision,
-  level_reached int,
-  duration_seconds int,
-  game_metadata jsonb,
-  completed_at timestamptz DEFAULT now()
-);
+  score integer NOT NULL,
+  accuracy double precision NULL,
+  avg_reaction_ms double precision NULL,
+  level_reached integer NULL,
+  duration_seconds integer NULL,
+  game_metadata jsonb NULL,
+  completed_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT game_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT game_sessions_user_id_fkey FOREIGN KEY (user_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_game_sessions_user
+  ON public.game_sessions USING btree (user_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_game_sessions_completed_at
+  ON public.game_sessions USING btree (completed_at DESC) TABLESPACE pg_default;
 
 -- ============================================================
--- 5. ai_feedback  (polymorphic FK — session_id points to
---    exercise_sessions.id OR game_sessions.id, disambiguated
---    by session_type)
+-- 6.1) cognitive_test_sessions
 -- ============================================================
-CREATE TABLE ai_feedback (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS public.cognitive_test_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  test_type text NOT NULL,
+  score integer NOT NULL,
+  response_time_ms integer NULL,
+  accuracy double precision NULL,
+  transcript text NULL,
+  expected_response text NULL,
+  word_count integer NULL,
+  error_count integer NULL,
+  duration_seconds integer NULL,
+  test_metadata jsonb NULL,
+  completed_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT cognitive_test_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT cognitive_test_sessions_user_id_fkey FOREIGN KEY (user_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_cognitive_test_sessions_user
+  ON public.cognitive_test_sessions USING btree (user_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_cognitive_test_sessions_completed_at
+  ON public.cognitive_test_sessions USING btree (completed_at DESC) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_cognitive_test_sessions_type
+  ON public.cognitive_test_sessions USING btree (user_id, test_type) TABLESPACE pg_default;
+
+-- ============================================================
+-- 7) ai_feedback
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.ai_feedback (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
   session_id uuid NOT NULL,
   session_type text NOT NULL,
-  summary text,
-  tips jsonb,
-  encouragement text,
-  focus_areas jsonb,
-  recovery_score int,
-  created_at timestamptz DEFAULT now()
-);
+  summary text NULL,
+  tips jsonb NULL,
+  encouragement text NULL,
+  focus_areas jsonb NULL,
+  recovery_score integer NULL,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT ai_feedback_pkey PRIMARY KEY (id),
+  CONSTRAINT ai_feedback_user_id_fkey FOREIGN KEY (user_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_ai_feedback_session
+  ON public.ai_feedback USING btree (session_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_ai_feedback_user
+  ON public.ai_feedback USING btree (user_id) TABLESPACE pg_default;
 
 -- ============================================================
--- indexes
+-- 8) messages
 -- ============================================================
-CREATE INDEX idx_exercise_sessions_user ON exercise_sessions(user_id);
-CREATE INDEX idx_exercise_sessions_exercise ON exercise_sessions(exercise_id);
-CREATE INDEX idx_exercise_sessions_completed_at ON exercise_sessions(completed_at DESC);
-CREATE INDEX idx_game_sessions_user ON game_sessions(user_id);
-CREATE INDEX idx_game_sessions_completed_at ON game_sessions(completed_at DESC);
-CREATE INDEX idx_ai_feedback_session ON ai_feedback(session_id);
-CREATE INDEX idx_ai_feedback_user ON ai_feedback(user_id);
+CREATE TABLE IF NOT EXISTS public.messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL,
+  sender_type text NOT NULL,
+  sender_id uuid NOT NULL,
+  content text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT messages_pkey PRIMARY KEY (id),
+  CONSTRAINT messages_patient_id_fkey FOREIGN KEY (patient_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_messages_patient
+  ON public.messages USING btree (patient_id) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_messages_created
+  ON public.messages USING btree (created_at DESC) TABLESPACE pg_default;
 
 -- ============================================================
--- seed exercises  (8 exercises — must match backend/seed/exercises.json)
+-- 9) alerts
 -- ============================================================
-INSERT INTO exercises (id, name, description, body_part, difficulty, angle_config, instructions, thumbnail_url) VALUES
-(
-  'a1000001-0001-4000-8000-000000000001',
-  'Shoulder Flexion',
-  'Raise your arm forward and upward through comfortable range.',
-  'shoulder',
-  'beginner',
-  '{"joint": "left_shoulder", "points": ["left_elbow", "left_shoulder", "left_hip"], "target_angle": 160, "threshold": 15}'::jsonb,
-  'Stand tall. Keep elbow soft. Raise your arm forward to shoulder height or as directed, pause briefly, then lower with control. Repeat for prescribed reps.',
-  '/images/exercises/shoulder-flexion.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000002',
-  'Shoulder Abduction',
-  'Raise the arm out to the side in the scapular plane.',
-  'shoulder',
-  'beginner',
-  '{"joint": "right_shoulder", "points": ["right_elbow", "right_shoulder", "right_hip"], "target_angle": 150, "threshold": 15}'::jsonb,
-  'Thumb slightly toward ceiling. Lift arm out to the side to comfortable height, pause, lower with control. Avoid shrugging the shoulder.',
-  '/images/exercises/shoulder-abduction.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000003',
-  'Elbow Flexion',
-  'Bend and straighten the elbow for range and control.',
-  'elbow',
-  'beginner',
-  '{"joint": "right_elbow", "points": ["right_wrist", "right_elbow", "right_shoulder"], "target_angle": 45, "threshold": 15}'::jsonb,
-  'Start with arm at your side, palm forward. Bend the elbow to bring hand toward shoulder, then extend smoothly. Keep shoulder relaxed.',
-  '/images/exercises/elbow-flexion.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000004',
-  'Knee Extension',
-  'Straighten the knee to build quadriceps control and range.',
-  'knee',
-  'beginner',
-  '{"joint": "right_knee", "points": ["right_ankle", "right_knee", "right_hip"], "target_angle": 170, "threshold": 10}'::jsonb,
-  'Sit upright on a chair. Slowly straighten your knee until your leg is extended. Hold for 2 seconds, then lower slowly.',
-  '/images/exercises/knee-extension.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000005',
-  'Knee Flexion',
-  'Bend your knee as far as comfortable.',
-  'knee',
-  'intermediate',
-  '{"joint": "right_knee", "points": ["right_ankle", "right_knee", "right_hip"], "target_angle": 90, "threshold": 15}'::jsonb,
-  'Stand holding a support. Slowly bend your knee, bringing your heel toward your buttocks. Hold briefly, then lower slowly.',
-  '/images/exercises/knee-flexion.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000006',
-  'Hip Abduction',
-  'Lift the leg sideways to strengthen hip stabilizers.',
-  'hip',
-  'intermediate',
-  '{"joint": "right_hip", "points": ["right_knee", "right_hip", "left_hip"], "target_angle": 30, "threshold": 10}'::jsonb,
-  'Stand holding support if needed. Keep toes forward. Lift the leg out to the side a few inches without leaning the trunk. Lower slowly.',
-  '/images/exercises/hip-abduction.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000007',
-  'Shoulder External Rotation',
-  'Rotate your shoulder outward with elbow bent.',
-  'shoulder',
-  'intermediate',
-  '{"joint": "right_shoulder", "points": ["right_wrist", "right_elbow", "right_shoulder"], "target_angle": 90, "threshold": 15}'::jsonb,
-  'Hold your elbow at 90° at your side. Rotate your forearm outward, keeping your elbow tucked. Return slowly.',
-  '/images/exercises/shoulder-external-rotation.png'
-),
-(
-  'a1000001-0001-4000-8000-000000000008',
-  'Straight Leg Raise',
-  'Lift your straight leg from a lying position.',
-  'hip',
-  'beginner',
-  '{"joint": "right_hip", "points": ["right_knee", "right_hip", "left_shoulder"], "target_angle": 45, "threshold": 10}'::jsonb,
-  'Lie flat on your back. Keep one knee bent with foot flat. Tighten the thigh of the other leg and raise it to the height of the bent knee. Lower slowly.',
-  '/images/exercises/straight-leg-raise.png'
-);
+CREATE TABLE IF NOT EXISTS public.alerts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL,
+  message text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT alerts_pkey PRIMARY KEY (id),
+  CONSTRAINT alerts_patient_id_fkey FOREIGN KEY (patient_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+-- ============================================================
+-- 10) reports
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.reports (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL,
+  report_json jsonb NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT reports_pkey PRIMARY KEY (id),
+  CONSTRAINT reports_patient_id_fkey FOREIGN KEY (patient_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_reports_patient
+  ON public.reports USING btree (patient_id, created_at DESC) TABLESPACE pg_default;
+
+-- ============================================================
+-- 11) ai_recommendations
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.ai_recommendations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  patient_id uuid NOT NULL,
+  recommendation_json jsonb NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT ai_recommendations_pkey PRIMARY KEY (id),
+  CONSTRAINT ai_recommendations_patient_id_fkey FOREIGN KEY (patient_id)
+    REFERENCES public.patients (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_ai_recommendations_patient
+  ON public.ai_recommendations USING btree (patient_id, created_at DESC) TABLESPACE pg_default;

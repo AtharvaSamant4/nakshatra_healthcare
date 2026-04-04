@@ -8,20 +8,26 @@ import { cn } from "@/lib/utils"
 
 interface ExerciseControlsProps {
   isActive: boolean
+  isPreparing?: boolean
+  preparationSeconds?: number
   repCount: number
   formQuality: "good" | "bad" | "neutral"
   onStart: () => void
   onStop: () => void
   onReset: () => void
+  onSkipDemo?: () => void
 }
 
 export function ExerciseControls({
   isActive,
+  isPreparing = false,
+  preparationSeconds = 0,
   repCount,
   formQuality,
   onStart,
   onStop,
   onReset,
+  onSkipDemo,
 }: ExerciseControlsProps) {
   return (
     <div className="space-y-4">
@@ -73,7 +79,7 @@ export function ExerciseControls({
 
       {/* Control Buttons */}
       <div className="flex gap-3">
-        {!isActive ? (
+        {!isActive && !isPreparing ? (
           <Button
             onClick={onStart}
             size="lg"
@@ -82,6 +88,26 @@ export function ExerciseControls({
             <Play className="mr-2 h-5 w-5" />
             Start Session
           </Button>
+        ) : isPreparing ? (
+          <>
+            <Button
+              size="lg"
+              variant="secondary"
+              className="flex-1 h-14 text-lg font-semibold"
+              disabled
+            >
+              <Play className="mr-2 h-5 w-5" />
+              Demo: {preparationSeconds}s
+            </Button>
+            <Button
+              onClick={onSkipDemo}
+              size="lg"
+              variant="outline"
+              className="h-14 px-4"
+            >
+              Skip
+            </Button>
+          </>
         ) : (
           <Button
             onClick={onStop}

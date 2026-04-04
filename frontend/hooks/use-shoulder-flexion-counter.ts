@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from "react";
+import { useRef, useCallback, useMemo, useState } from "react";
 
 // Types for MediaPipe landmarks
 export interface Landmark {
@@ -9,6 +9,20 @@ export interface Landmark {
 }
 
 export type MovementState = "DOWN" | "UP";
+type MotionTrend = "higher_is_target" | "lower_is_target";
+type SideName = "left" | "right";
+
+interface SideState {
+  currentState: MovementState;
+  repCount: number;
+  lastRepTime: number;
+  maxAngle: number;
+  minAngle: number;
+  smoothedAngle: number | null;
+  lastFrameTime: number;
+  upFrameCount: number;
+  downFrameCount: number;
+}
 
 interface CounterOutput {
   repCount: number;
@@ -23,12 +37,31 @@ interface CounterOutput {
     calibrated: boolean;
     upThreshold: number;
     downThreshold: number;
+    motionTrend: MotionTrend;
+    targetReached: boolean;
+    startReached: boolean;
+    postureScore: number;
+    leftRepCount: number;
+    rightRepCount: number;
+    leftPostureScore: number;
+    rightPostureScore: number;
   };
 }
 
 interface ShoulderFlexionOptions {
   enableCalibration?: boolean;
   calibrationWindowMs?: number;
+}
+
+export interface ExerciseAngleConfig {
+  joint: string;
+  points: [string, string, string] | string[];
+  target_angle: number;
+  threshold: number;
+}
+
+interface ExerciseCounterOptions extends ShoulderFlexionOptions {
+  angleConfig?: ExerciseAngleConfig;
 }
 
 // Configurable constants for shoulder flexion
@@ -50,6 +83,70 @@ const CONSTANTS = {
   MIN_CALIBRATED_RANGE: 25,
 };
 
+const LANDMARK_INDEX: Record<string, number> = {
+  nose: 0,
+  left_shoulder: 11,
+  right_shoulder: 12,
+  left_elbow: 13,
+  right_elbow: 14,
+  left_wrist: 15,
+  right_wrist: 16,
+  left_hip: 23,
+  right_hip: 24,
+  left_knee: 25,
+  right_knee: 26,
+  left_ankle: 27,
+  right_ankle: 28,
+};
+
+const DEFAULT_ANGLE_CONFIG: ExerciseAngleConfig = {
+  joint: "left_shoulder",
+  points: ["left_elbow", "left_shoulder", "left_hip"],
+  target_angle: 160,
+  threshold: 15,
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
+
+const normalizeAngleConfig = (input?: ExerciseAngleConfig): ExerciseAngleConfig => {
+  if (!input || !Array.isArray(input.points) || input.points.length < 3) {
+    return DEFAULT_ANGLE_CONFIG;
+  }
+  return {
+    joint: input.joint,
+    points: [input.points[0], input.points[1], input.points[2]],
+    target_angle: input.target_angle,
+    threshold: input.threshold,
+  };
+};
+
+const getConfiguredSide = (joint: string): "left" | "right" => {
+  if (joint.startsWith("left_")) return "left";
+  return "right";
+};
+
+const getDefaultMotionTrend = (targetAngle: number): MotionTrend =>
+  targetAngle >= 95 ? "higher_is_target" : "lower_is_target";
+
+const mirrorLandmarkName = (point: string): string => {
+  if (point.startsWith("left_")) return point.replace("left_", "right_");
+  if (point.startsWith("right_")) return point.replace("right_", "left_");
+  return point;
+};
+
+const buildSideState = (): SideState => ({
+  currentState: "DOWN",
+  repCount: 0,
+  lastRepTime: 0,
+  maxAngle: 0,
+  minAngle: 180,
+  smoothedAngle: null,
+  lastFrameTime: 0,
+  upFrameCount: 0,
+  downFrameCount: 0,
+});
+
 /**
  * 2. Compute shoulder flexion angle using 3 landmarks
  * A = Hip, B = Shoulder (vertex), C = Elbow
@@ -65,9 +162,91 @@ const calculateAngle = (a: Landmark, b: Landmark, c: Landmark): number => {
   return angle;
 };
 
-export const useShoulderFlexionCounter = (options?: ShoulderFlexionOptions) => {
+export const useExerciseCounter = (options?: ExerciseCounterOptions) => {
   const enableCalibration = options?.enableCalibration ?? true;
   const calibrationWindowMs = options?.calibrationWindowMs ?? CONSTANTS.CALIBRATION_WINDOW_MS;
+  const config = useMemo(
+    () => normalizeAngleConfig(options?.angleConfig),
+    [options?.angleConfig]
+  );
+
+  const thresholdConfig = useMemo(() => {
+    const configuredSide = getConfiguredSide(config.joint);
+    const motionTrend = getDefaultMotionTrend(config.target_angle);
+    const hysteresisGap = Math.max(20, config.threshold * 2);
+
+    let defaultUpThreshold = 150;
+    let defaultDownThreshold = 40;
+    let defaultValidRepMax = 145;
+    let defaultValidRepMin = 45;
+
+    if (motionTrend === "higher_is_target") {
+      const rawUpThreshold = clamp(
+        config.target_angle - config.threshold,
+        15,
+        175
+      );
+      const rawDownThreshold = clamp(
+        rawUpThreshold - hysteresisGap,
+        5,
+        150
+      );
+      defaultUpThreshold = Math.max(rawUpThreshold, rawDownThreshold + 20);
+      defaultDownThreshold = Math.min(rawDownThreshold, defaultUpThreshold - 20);
+      defaultValidRepMax = Math.max(10, defaultUpThreshold - 2);
+      defaultValidRepMin = Math.min(170, defaultDownThreshold + 4);
+    } else {
+      const rawTargetThreshold = clamp(
+        config.target_angle + config.threshold,
+        5,
+        170
+      );
+      const rawStartThreshold = clamp(
+        rawTargetThreshold + hysteresisGap,
+        20,
+        175
+      );
+      defaultUpThreshold = Math.max(rawStartThreshold, rawTargetThreshold + 20);
+      defaultDownThreshold = Math.min(rawTargetThreshold, defaultUpThreshold - 20);
+      defaultValidRepMax = Math.max(20, defaultUpThreshold - 4);
+      defaultValidRepMin = Math.min(170, defaultDownThreshold + 4);
+    }
+
+    return {
+      configuredSide,
+      motionTrend,
+      defaultUpThreshold,
+      defaultDownThreshold,
+      defaultValidRepMax,
+      defaultValidRepMin,
+    };
+  }, [config.joint, config.target_angle, config.threshold]);
+
+  const {
+    configuredSide,
+    motionTrend,
+    defaultUpThreshold,
+    defaultDownThreshold,
+    defaultValidRepMax,
+    defaultValidRepMin,
+  } = thresholdConfig;
+
+  const sideConfig = useMemo(() => {
+    const hasLaterality =
+      config.joint.startsWith("left_") ||
+      config.joint.startsWith("right_") ||
+      config.points.some((p) => p.startsWith("left_") || p.startsWith("right_"));
+
+    const configuredPoints = [config.points[0], config.points[1], config.points[2]];
+    const mirroredPoints = configuredPoints.map((point) => mirrorLandmarkName(point));
+    const supportsBilateral = hasLaterality;
+
+    return {
+      supportsBilateral,
+      configuredPoints,
+      mirroredPoints,
+    };
+  }, [config.joint, config.points]);
 
   // Output state - updated at animation frame rate but can be throttled
   const [output, setOutput] = useState<CounterOutput>({
@@ -79,55 +258,80 @@ export const useShoulderFlexionCounter = (options?: ShoulderFlexionOptions) => {
       minAngle: 180,
       velocity: 0,
       lastFrameTime: 0,
-      activeSide: "right",
+        activeSide: configuredSide,
       calibrated: !enableCalibration,
-      upThreshold: CONSTANTS.ANGLE_THRESHOLD_UP,
-      downThreshold: CONSTANTS.ANGLE_THRESHOLD_DOWN,
+        upThreshold: defaultUpThreshold,
+        downThreshold: defaultDownThreshold,
+      motionTrend,
+      targetReached: false,
+      startReached: true,
+      postureScore: 0,
+      leftRepCount: 0,
+      rightRepCount: 0,
+      leftPostureScore: 0,
+      rightPostureScore: 0,
     },
   });
 
   // 12. Use useRef for persistent values to avoid unnecessary re-renders
   const stateRef = useRef({
-    currentState: "DOWN" as MovementState,
-    repCount: 0,
-    lastRepTime: 0,
-    maxAngle: 0,
-    minAngle: 180, // starting neutral/down
-    smoothedAngle: null as number | null,
-    lastFrameTime: 0,
-    activeSide: "right" as "left" | "right",
+    activeSide: configuredSide as "left" | "right",
     calibrated: !enableCalibration,
     calibrationStartTime: 0,
     calibrationMinAngle: 180,
     calibrationMaxAngle: 0,
-    upThreshold: CONSTANTS.ANGLE_THRESHOLD_UP,
-    downThreshold: CONSTANTS.ANGLE_THRESHOLD_DOWN,
-    validRepMinAngle: CONSTANTS.VALID_REP_MIN_ANGLE,
-    validRepMaxAngle: CONSTANTS.VALID_REP_MAX_ANGLE,
-    upFrameCount: 0,
-    downFrameCount: 0,
+    upThreshold: defaultUpThreshold,
+    downThreshold: defaultDownThreshold,
+    motionTrend,
+    validRepMinAngle: defaultValidRepMin,
+    validRepMaxAngle: defaultValidRepMax,
+    sides: {
+      left: buildSideState(),
+      right: buildSideState(),
+    } as Record<SideName, SideState>,
   });
+
+  const isTargetReached = useCallback((angle: number) => {
+    if (stateRef.current.motionTrend === "higher_is_target") {
+      return angle >= stateRef.current.upThreshold;
+    }
+    return angle <= stateRef.current.downThreshold;
+  }, []);
+
+  const isStartReached = useCallback((angle: number) => {
+    if (stateRef.current.motionTrend === "higher_is_target") {
+      return angle <= stateRef.current.downThreshold;
+    }
+    return angle >= stateRef.current.upThreshold;
+  }, []);
+
+  const getPostureScore = useCallback((angle: number) => {
+    const range = Math.max(1, stateRef.current.upThreshold - stateRef.current.downThreshold);
+    let progress = 0;
+    if (stateRef.current.motionTrend === "higher_is_target") {
+      progress = (angle - stateRef.current.downThreshold) / range;
+    } else {
+      progress = (stateRef.current.upThreshold - angle) / range;
+    }
+    return Math.round(clamp(progress, 0, 1) * 100);
+  }, []);
 
   const resetCounter = useCallback(() => {
     stateRef.current = {
-      currentState: "DOWN",
-      repCount: 0,
-      lastRepTime: 0,
-      maxAngle: 0,
-      minAngle: 180,
-      smoothedAngle: null,
-      lastFrameTime: 0,
-      activeSide: "right",
+      activeSide: configuredSide,
       calibrated: !enableCalibration,
       calibrationStartTime: 0,
       calibrationMinAngle: 180,
       calibrationMaxAngle: 0,
-      upThreshold: CONSTANTS.ANGLE_THRESHOLD_UP,
-      downThreshold: CONSTANTS.ANGLE_THRESHOLD_DOWN,
-      validRepMinAngle: CONSTANTS.VALID_REP_MIN_ANGLE,
-      validRepMaxAngle: CONSTANTS.VALID_REP_MAX_ANGLE,
-      upFrameCount: 0,
-      downFrameCount: 0,
+      upThreshold: defaultUpThreshold,
+      downThreshold: defaultDownThreshold,
+      motionTrend,
+      validRepMinAngle: defaultValidRepMin,
+      validRepMaxAngle: defaultValidRepMax,
+      sides: {
+        left: buildSideState(),
+        right: buildSideState(),
+      },
     }
     setOutput({
       repCount: 0,
@@ -138,91 +342,104 @@ export const useShoulderFlexionCounter = (options?: ShoulderFlexionOptions) => {
         minAngle: 180,
         velocity: 0,
         lastFrameTime: 0,
-        activeSide: "right",
+        activeSide: configuredSide,
         calibrated: !enableCalibration,
-        upThreshold: CONSTANTS.ANGLE_THRESHOLD_UP,
-        downThreshold: CONSTANTS.ANGLE_THRESHOLD_DOWN,
+        upThreshold: defaultUpThreshold,
+        downThreshold: defaultDownThreshold,
+        motionTrend,
+        targetReached: false,
+        startReached: true,
+        postureScore: 0,
+        leftRepCount: 0,
+        rightRepCount: 0,
+        leftPostureScore: 0,
+        rightPostureScore: 0,
       },
     })
-  }, [enableCalibration])
+  }, [configuredSide, defaultDownThreshold, defaultUpThreshold, defaultValidRepMax, defaultValidRepMin, enableCalibration, motionTrend])
 
-  const smoothAngle = (currentRawIndex: number): number => {
+  const smoothAngle = (side: SideName, currentRawIndex: number): number => {
+    const sideState = stateRef.current.sides[side];
     let currentSmoothedAngle = currentRawIndex;
-    if (stateRef.current.smoothedAngle !== null) {
+    if (sideState.smoothedAngle !== null) {
       // 3. Add ANGLE SMOOTHING
       currentSmoothedAngle =
-        stateRef.current.smoothedAngle * (1 - CONSTANTS.SMOOTHING_FACTOR) +
+        sideState.smoothedAngle * (1 - CONSTANTS.SMOOTHING_FACTOR) +
         currentRawIndex * CONSTANTS.SMOOTHING_FACTOR;
     }
-    stateRef.current.smoothedAngle = currentSmoothedAngle;
+    sideState.smoothedAngle = currentSmoothedAngle;
     return currentSmoothedAngle;
   };
 
-  const shouldCountRep = (): boolean => {
+  const shouldCountRep = (side: SideName): boolean => {
     const now = Date.now();
-    const { maxAngle, minAngle, lastRepTime } = stateRef.current;
+    const { maxAngle, minAngle, lastRepTime } = stateRef.current.sides[side];
     
     // 7. Add RANGE VALIDATION (Must hit full ROM: >150 and <50)
     const validRange =
-      maxAngle >= stateRef.current.validRepMaxAngle &&
-      minAngle <= stateRef.current.validRepMinAngle;
+      stateRef.current.motionTrend === "higher_is_target"
+        ? maxAngle >= stateRef.current.validRepMaxAngle &&
+          minAngle <= stateRef.current.validRepMinAngle
+        : minAngle <= stateRef.current.validRepMinAngle &&
+          maxAngle >= stateRef.current.validRepMaxAngle;
     // 5. Add TIME-BASED DEBOUNCE (800ms between reps)
     const dbounced = now - lastRepTime >= CONSTANTS.MIN_TIME_BETWEEN_REPS_MS;
 
     return validRange && dbounced;
   };
 
-  const updateState = (angle: number) => {
+  const updateState = (side: SideName, angle: number) => {
     const now = Date.now();
-    const { currentState } = stateRef.current;
+    const sideState = stateRef.current.sides[side];
+    const { currentState } = sideState;
 
     // Track min/max for the current rep cycle
-    if (angle > stateRef.current.maxAngle) stateRef.current.maxAngle = angle;
-    if (angle < stateRef.current.minAngle) stateRef.current.minAngle = angle;
+    if (angle > sideState.maxAngle) sideState.maxAngle = angle;
+    if (angle < sideState.minAngle) sideState.minAngle = angle;
 
     // 1. STATE MACHINE with 4. HYSTERESIS thresholds
     if (currentState === "DOWN") {
-      if (angle > stateRef.current.upThreshold) {
-        stateRef.current.upFrameCount += 1;
+      if (isTargetReached(angle)) {
+        sideState.upFrameCount += 1;
       } else {
-        stateRef.current.upFrameCount = 0;
+        sideState.upFrameCount = 0;
       }
 
-      if (stateRef.current.upFrameCount >= CONSTANTS.REQUIRED_STABLE_FRAMES) {
+      if (sideState.upFrameCount >= CONSTANTS.REQUIRED_STABLE_FRAMES) {
         // Transition DOWN -> UP only after stable frames above threshold.
-        stateRef.current.currentState = "UP";
-        stateRef.current.upFrameCount = 0;
+        sideState.currentState = "UP";
+        sideState.upFrameCount = 0;
       }
       return;
     }
 
     if (currentState === "UP") {
-      if (angle < stateRef.current.downThreshold) {
-        stateRef.current.downFrameCount += 1;
+      if (isStartReached(angle)) {
+        sideState.downFrameCount += 1;
       } else {
-        stateRef.current.downFrameCount = 0;
+        sideState.downFrameCount = 0;
       }
 
-      if (stateRef.current.downFrameCount < CONSTANTS.REQUIRED_STABLE_FRAMES) {
+      if (sideState.downFrameCount < CONSTANTS.REQUIRED_STABLE_FRAMES) {
         return;
       }
 
       // Transition UP -> DOWN (Complete rep cycle)
       
       // 6. Add REP COOLDOWN (Don't count if we just counted one ~600ms ago)
-      if (now - stateRef.current.lastRepTime >= CONSTANTS.REP_COOLDOWN_MS) {
-        if (shouldCountRep()) {
-          stateRef.current.repCount += 1;
-          stateRef.current.lastRepTime = now;
+      if (now - sideState.lastRepTime >= CONSTANTS.REP_COOLDOWN_MS) {
+        if (shouldCountRep(side)) {
+          sideState.repCount += 1;
+          sideState.lastRepTime = now;
         }
       }
       
       // Reset state for next rep
-      stateRef.current.currentState = "DOWN";
-      stateRef.current.downFrameCount = 0;
+      sideState.currentState = "DOWN";
+      sideState.downFrameCount = 0;
       // Reset range trackers
-      stateRef.current.maxAngle = 0;
-      stateRef.current.minAngle = 180;
+      sideState.maxAngle = 0;
+      sideState.minAngle = 180;
     }
   };
 
@@ -250,188 +467,212 @@ export const useShoulderFlexionCounter = (options?: ShoulderFlexionOptions) => {
       return;
     }
 
-    // Dynamic thresholds with margins based on observed ROM.
-    const upThreshold = Math.min(175, Math.max(95, max - range * 0.12));
-    const downThreshold = Math.max(8, Math.min(120, min + range * 0.12));
+    const nearMax = Math.abs(config.target_angle - max);
+    const nearMin = Math.abs(config.target_angle - min);
+    stateRef.current.motionTrend = nearMax <= nearMin ? "higher_is_target" : "lower_is_target";
 
-    // Ensure enough hysteresis separation.
-    const minGap = 25;
-    const adjustedUp = Math.max(upThreshold, downThreshold + minGap);
-    const adjustedDown = Math.min(downThreshold, adjustedUp - minGap);
+    if (stateRef.current.motionTrend === "higher_is_target") {
+      const upThreshold = Math.min(175, Math.max(95, max - range * 0.12));
+      const downThreshold = Math.max(8, Math.min(120, min + range * 0.12));
+      const minGap = 25;
+      const adjustedUp = Math.max(upThreshold, downThreshold + minGap);
+      const adjustedDown = Math.min(downThreshold, adjustedUp - minGap);
 
-    stateRef.current.upThreshold = adjustedUp;
-    stateRef.current.downThreshold = adjustedDown;
-    stateRef.current.validRepMaxAngle = Math.max(90, adjustedUp - 4);
-    stateRef.current.validRepMinAngle = Math.min(130, adjustedDown + 6);
+      stateRef.current.upThreshold = adjustedUp;
+      stateRef.current.downThreshold = adjustedDown;
+      stateRef.current.validRepMaxAngle = Math.max(90, adjustedUp - 4);
+      stateRef.current.validRepMinAngle = Math.min(130, adjustedDown + 6);
+    } else {
+      const targetThreshold = clamp(min + range * 0.18, 5, 170);
+      const startThreshold = clamp(max - range * 0.18, 20, 175);
+      const minGap = 25;
+      const adjustedUp = Math.max(startThreshold, targetThreshold + minGap);
+      const adjustedDown = Math.min(targetThreshold, adjustedUp - minGap);
+
+      stateRef.current.upThreshold = adjustedUp;
+      stateRef.current.downThreshold = adjustedDown;
+      stateRef.current.validRepMaxAngle = Math.max(20, adjustedUp - 4);
+      stateRef.current.validRepMinAngle = Math.min(170, adjustedDown + 6);
+    }
+
     stateRef.current.calibrated = true;
   };
 
-  const getBestArmLandmarks = (landmarks: Landmark[]) => {
-    const left = {
-      hip: landmarks[23],
-      shoulder: landmarks[11],
-      elbow: landmarks[13],
-    };
-    const right = {
-      hip: landmarks[24],
-      shoulder: landmarks[12],
-      elbow: landmarks[14],
-    };
+  const getConfiguredPoints = useCallback(
+    (landmarks: Landmark[], points: [string, string, string]) => {
+      const [pointA, pointB, pointC] = points;
+      const indexA = LANDMARK_INDEX[pointA];
+      const indexB = LANDMARK_INDEX[pointB];
+      const indexC = LANDMARK_INDEX[pointC];
 
-    const leftScore =
-      (left.hip?.visibility ?? 0) +
-      (left.shoulder?.visibility ?? 0) +
-      (left.elbow?.visibility ?? 0);
-    const rightScore =
-      (right.hip?.visibility ?? 0) +
-      (right.shoulder?.visibility ?? 0) +
-      (right.elbow?.visibility ?? 0);
-
-    const leftConfidenceOk =
-      !!left.hip &&
-      !!left.shoulder &&
-      !!left.elbow &&
-      (left.hip.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY &&
-      (left.shoulder.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY &&
-      (left.elbow.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY;
-
-    const rightConfidenceOk =
-      !!right.hip &&
-      !!right.shoulder &&
-      !!right.elbow &&
-      (right.hip.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY &&
-      (right.shoulder.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY &&
-      (right.elbow.visibility ?? 0) >= CONSTANTS.MIN_VISIBILITY;
-
-    const leftAngle = leftConfidenceOk ? calculateAngle(left.hip, left.shoulder, left.elbow) : null;
-    const rightAngle = rightConfidenceOk ? calculateAngle(right.hip, right.shoulder, right.elbow) : null;
-
-    const currentSide = stateRef.current.activeSide;
-    const currentScore = currentSide === "left" ? leftScore : rightScore;
-    const otherScore = currentSide === "left" ? rightScore : leftScore;
-
-    // Prefer the arm with higher angle while in DOWN phase (the one likely being actively lifted).
-    if (
-      stateRef.current.currentState === "DOWN" &&
-      leftAngle != null &&
-      rightAngle != null
-    ) {
-      const scoreGap = Math.abs(leftScore - rightScore);
-      if (scoreGap < 0.9) {
-        stateRef.current.activeSide = leftAngle >= rightAngle ? "left" : "right";
-      }
-    }
-
-    // Keep current side unless the other side is clearly better.
-    // Also avoid switching during UP phase so one rep uses one arm consistently.
-    if (
-      stateRef.current.currentState === "DOWN" &&
-      otherScore - currentScore > CONSTANTS.SIDE_SWITCH_MARGIN
-    ) {
-      stateRef.current.activeSide = currentSide === "left" ? "right" : "left";
-      // Reset smoothing to avoid artificial spikes when switching sides.
-      stateRef.current.smoothedAngle = null;
-    }
-
-    if (stateRef.current.activeSide === "left") {
       return {
-        side: "left" as const,
-        hip: left.hip,
-        shoulder: left.shoulder,
-        elbow: left.elbow,
+        pointA: typeof indexA === "number" ? landmarks[indexA] : undefined,
+        pointB: typeof indexB === "number" ? landmarks[indexB] : undefined,
+        pointC: typeof indexC === "number" ? landmarks[indexC] : undefined,
       };
-    }
+    },
+    []
+  );
 
-    return {
-      side: "right" as const,
-      hip: right.hip,
-      shoulder: right.shoulder,
-      elbow: right.elbow,
-    };
-  };
+  const getProgressRatio = useCallback((angle: number) => {
+    const range = Math.max(1, stateRef.current.upThreshold - stateRef.current.downThreshold);
+    if (stateRef.current.motionTrend === "higher_is_target") {
+      return clamp((angle - stateRef.current.downThreshold) / range, 0, 1);
+    }
+    return clamp((stateRef.current.upThreshold - angle) / range, 0, 1);
+  }, []);
 
   const processFrame = useCallback((landmarks: Landmark[]): CounterOutput | null => {
     const now = Date.now();
-    const activeArm = getBestArmLandmarks(landmarks);
-    stateRef.current.activeSide = activeArm.side;
-
-    // 9. Add LANDMARK CONFIDENCE CHECK
-    if (
-      !activeArm.hip || !activeArm.shoulder || !activeArm.elbow ||
-      (activeArm.hip.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY ||
-      (activeArm.shoulder.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY ||
-      (activeArm.elbow.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY
-    ) {
-      return null; // Skip noisy/unseen frames
+    const sideInputs: Array<{ side: SideName; points: [string, string, string] }> = [
+      { side: configuredSide, points: sideConfig.configuredPoints as [string, string, string] },
+    ];
+    if (sideConfig.supportsBilateral) {
+      sideInputs.push({
+        side: configuredSide === "left" ? "right" : "left",
+        points: sideConfig.mirroredPoints as [string, string, string],
+      });
     }
 
-    const rawAngle = calculateAngle(activeArm.hip, activeArm.shoulder, activeArm.elbow);
-    const previousSmoothedAngle = stateRef.current.smoothedAngle
-    const smoothedAngle = smoothAngle(rawAngle);
+    let trackedSides = 0;
+    let activeAngle = 0;
+    let activeVelocity = 0;
+    let activeProgress = -1;
 
-    applyCalibrationIfReady(now, smoothedAngle);
+    for (const input of sideInputs) {
+      const sidePoints = getConfiguredPoints(landmarks, input.points);
+      if (
+        !sidePoints.pointA || !sidePoints.pointB || !sidePoints.pointC ||
+        (sidePoints.pointA.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY ||
+        (sidePoints.pointB.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY ||
+        (sidePoints.pointC.visibility ?? 0) < CONSTANTS.MIN_VISIBILITY
+      ) {
+        continue;
+      }
 
-    // 8. Add VELOCITY FILTER
-    const dtSeconds = (now - stateRef.current.lastFrameTime) / 1000;
-    let velocity = 0;
-    
-    if (stateRef.current.lastFrameTime > 0 && dtSeconds > 0 && previousSmoothedAngle != null) {
-      velocity = Math.abs(smoothedAngle - previousSmoothedAngle) / dtSeconds;
-      
+      trackedSides += 1;
+      const sideState = stateRef.current.sides[input.side];
+      const rawAngle = calculateAngle(sidePoints.pointA, sidePoints.pointB, sidePoints.pointC);
+      const previousSmoothedAngle = sideState.smoothedAngle;
+      const smoothedAngle = smoothAngle(input.side, rawAngle);
+
+      applyCalibrationIfReady(now, smoothedAngle);
+
+      const dtSeconds = (now - sideState.lastFrameTime) / 1000;
+      let velocity = 0;
+      if (sideState.lastFrameTime > 0 && dtSeconds > 0 && previousSmoothedAngle != null) {
+        velocity = Math.abs(smoothedAngle - previousSmoothedAngle) / dtSeconds;
+      }
       if (velocity > CONSTANTS.MAX_ANGULAR_VELOCITY) {
-        // Excessive velocity detected, ignore frame data as it's likely a tracking error
-        stateRef.current.lastFrameTime = now;
-        return null;
+        sideState.lastFrameTime = now;
+        continue;
+      }
+
+      if (enableCalibration && !stateRef.current.calibrated) {
+        sideState.lastFrameTime = now;
+      } else {
+        updateState(input.side, smoothedAngle);
+        sideState.lastFrameTime = now;
+      }
+
+      const progress = getProgressRatio(smoothedAngle);
+      if (progress > activeProgress) {
+        activeProgress = progress;
+        activeAngle = smoothedAngle;
+        activeVelocity = velocity;
+        stateRef.current.activeSide = input.side;
       }
     }
 
+    if (trackedSides === 0) {
+      return null;
+    }
+
+    const leftState = stateRef.current.sides.left;
+    const rightState = stateRef.current.sides.right;
+    const totalReps = sideConfig.supportsBilateral
+      ? Math.min(leftState.repCount, rightState.repCount)
+      : stateRef.current.sides[configuredSide].repCount;
+    const postureScore = Math.max(
+      leftState.smoothedAngle != null ? getPostureScore(leftState.smoothedAngle) : 0,
+      rightState.smoothedAngle != null ? getPostureScore(rightState.smoothedAngle) : 0
+    );
+    const leftPostureScore = leftState.smoothedAngle != null ? getPostureScore(leftState.smoothedAngle) : 0;
+    const rightPostureScore = rightState.smoothedAngle != null ? getPostureScore(rightState.smoothedAngle) : 0;
+    const targetReached =
+      (leftState.smoothedAngle != null && isTargetReached(leftState.smoothedAngle)) ||
+      (rightState.smoothedAngle != null && isTargetReached(rightState.smoothedAngle));
+    const startReached =
+      (leftState.smoothedAngle != null && isStartReached(leftState.smoothedAngle)) ||
+      (rightState.smoothedAngle != null && isStartReached(rightState.smoothedAngle));
+    const currentState =
+      leftState.currentState === "UP" || rightState.currentState === "UP" ? "UP" : "DOWN";
+
+    const activeState = stateRef.current.sides[stateRef.current.activeSide];
+
     // During calibration, we only measure range and do not run rep state transitions.
     if (enableCalibration && !stateRef.current.calibrated) {
-      stateRef.current.lastFrameTime = now;
       const calibrationOutput: CounterOutput = {
-        repCount: stateRef.current.repCount,
-        currentState: stateRef.current.currentState,
-        currentAngle: smoothedAngle,
+        repCount: totalReps,
+        currentState,
+        currentAngle: activeAngle,
         debug: {
-          maxAngle: stateRef.current.maxAngle,
-          minAngle: stateRef.current.minAngle,
-          velocity: velocity,
+          maxAngle: activeState.maxAngle,
+          minAngle: activeState.minAngle,
+          velocity: activeVelocity,
           lastFrameTime: now,
           activeSide: stateRef.current.activeSide,
           calibrated: stateRef.current.calibrated,
           upThreshold: stateRef.current.upThreshold,
           downThreshold: stateRef.current.downThreshold,
+          motionTrend: stateRef.current.motionTrend,
+          targetReached,
+          startReached,
+          postureScore,
+          leftRepCount: leftState.repCount,
+          rightRepCount: rightState.repCount,
+          leftPostureScore,
+          rightPostureScore,
         }
       };
       setOutput(calibrationOutput);
       return calibrationOutput;
     }
 
-    // Process State Machine Logic
-    updateState(smoothedAngle);
-
-    stateRef.current.lastFrameTime = now;
-
     // 11. Output
     const frameOutput: CounterOutput = {
-      repCount: stateRef.current.repCount,
-      currentState: stateRef.current.currentState,
-      currentAngle: smoothedAngle,
+      repCount: totalReps,
+      currentState,
+      currentAngle: activeAngle,
       debug: {
-        maxAngle: stateRef.current.maxAngle,
-        minAngle: stateRef.current.minAngle,
-        velocity: velocity,
+        maxAngle: activeState.maxAngle,
+        minAngle: activeState.minAngle,
+        velocity: activeVelocity,
         lastFrameTime: now,
         activeSide: stateRef.current.activeSide,
         calibrated: stateRef.current.calibrated,
         upThreshold: stateRef.current.upThreshold,
         downThreshold: stateRef.current.downThreshold,
+        motionTrend: stateRef.current.motionTrend,
+        targetReached,
+        startReached,
+        postureScore,
+        leftRepCount: leftState.repCount,
+        rightRepCount: rightState.repCount,
+        leftPostureScore,
+        rightPostureScore,
       }
     };
     setOutput(frameOutput);
     return frameOutput;
 
-  }, [calibrationWindowMs, enableCalibration]);
+  }, [calibrationWindowMs, config.target_angle, configuredSide, enableCalibration, getConfiguredPoints, getPostureScore, getProgressRatio, isStartReached, isTargetReached, sideConfig.configuredPoints, sideConfig.mirroredPoints, sideConfig.supportsBilateral]);
 
   return { output, processFrame, resetCounter };
 };
+
+export const useShoulderFlexionCounter = (options?: ShoulderFlexionOptions) =>
+  useExerciseCounter({
+    ...options,
+    angleConfig: DEFAULT_ANGLE_CONFIG,
+  });

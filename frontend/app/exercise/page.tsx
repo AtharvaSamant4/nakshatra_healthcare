@@ -34,6 +34,8 @@ export default function ExercisePage() {
   const [currentAngle, setCurrentAngle] = useState(0)
   const [activeSide, setActiveSide] = useState<"left" | "right">("right")
   const [calibrated, setCalibrated] = useState(false)
+  const [isPreparing, setIsPreparing] = useState(false)
+  const [preparationSeconds, setPreparationSeconds] = useState(0)
 
   // Load exercises from API
   useEffect(() => {
@@ -81,12 +83,39 @@ export default function ExercisePage() {
   )
 
   const handleStart = useCallback(() => {
-    setStartedAt(new Date().toISOString())
-    setIsActive(true)
+    if (!selectedExerciseId) return
+    setIsActive(false)
+    setIsPreparing(true)
+    setPreparationSeconds(10)
     setFormQuality("neutral")
-  }, [])
+  }, [selectedExerciseId])
+
+  useEffect(() => {
+    if (!isPreparing) return
+
+    const timer = setInterval(() => {
+      setPreparationSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          setIsPreparing(false)
+          setStartedAt(new Date().toISOString())
+          setIsActive(true)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [isPreparing])
 
   const handleStop = useCallback(async () => {
+    if (isPreparing) {
+      setIsPreparing(false)
+      setPreparationSeconds(0)
+      return
+    }
+
     setIsActive(false)
 
     // Derive a form_score from the simulated good/bad form (0.0–1.0)
@@ -113,7 +142,15 @@ export default function ExercisePage() {
     }
 
     setSessionComplete(true)
-  }, [selectedUserId, selectedExerciseId, repCount, duration, startedAt])
+  }, [duration, isPreparing, repCount, selectedExerciseId, selectedUserId, startedAt])
+
+  const handleSkipDemo = useCallback(() => {
+    if (!isPreparing) return
+    setIsPreparing(false)
+    setPreparationSeconds(0)
+    setStartedAt(new Date().toISOString())
+    setIsActive(true)
+  }, [isPreparing])
 
   const handleReset = useCallback(() => {
     setRepCount(0)
@@ -126,7 +163,26 @@ export default function ExercisePage() {
     setCurrentAngle(0)
     setActiveSide("right")
     setCalibrated(false)
+    setIsPreparing(false)
+    setPreparationSeconds(0)
   }, [])
+
+  const handleExerciseChange = useCallback(
+    (nextExerciseId: string) => {
+      if (nextExerciseId === selectedExerciseId) return
+      setSelectedExerciseId(nextExerciseId)
+
+      if (isActive) {
+        setIsActive(false)
+      }
+
+      setIsPreparing(false)
+      setPreparationSeconds(0)
+
+      handleReset()
+    },
+    [handleReset, isActive, selectedExerciseId]
+  )
 
   const handleNewSession = useCallback(() => {
     handleReset()
@@ -134,6 +190,14 @@ export default function ExercisePage() {
   }, [handleReset])
 
   const selectedExercise = exercises.find((e) => e.id === selectedExerciseId)
+
+  useEffect(() => {
+    setRepCount(0)
+    setCurrentState("DOWN")
+    setCurrentAngle(0)
+    setFormQuality("neutral")
+    setCalibrated(false)
+  }, [selectedExerciseId])
 
   if (sessionComplete) {
     return (
@@ -164,7 +228,7 @@ export default function ExercisePage() {
             </p>
           </div>
           <div className="w-full sm:w-64">
-            <Select value={selectedExerciseId} onValueChange={setSelectedExerciseId}>
+            <Select value={selectedExerciseId} onValueChange={handleExerciseChange}>
               <SelectTrigger>
                 <SelectValue placeholder="Select exercise" />
               </SelectTrigger>
@@ -187,6 +251,11 @@ export default function ExercisePage() {
               <CardContent className="p-0">
                 <WebcamFeed
                   isActive={isActive}
+                  showDemo={isPreparing}
+                  demoSecondsRemaining={preparationSeconds}
+                  demoExerciseName={selectedExercise?.name}
+                  demoInstructions={selectedExercise?.instructions}
+                  angleConfig={selectedExercise?.angle_config}
                   className="aspect-video"
                   onMetricsChange={handleMetricsChange}
                 />
@@ -233,11 +302,14 @@ export default function ExercisePage() {
           <div>
             <ExerciseControls
               isActive={isActive}
+              isPreparing={isPreparing}
+              preparationSeconds={preparationSeconds}
               repCount={repCount}
               formQuality={formQuality}
               onStart={handleStart}
               onStop={handleStop}
               onReset={handleReset}
+              onSkipDemo={handleSkipDemo}
             />
 
             {/* Exercise Info */}

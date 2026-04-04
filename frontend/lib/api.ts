@@ -71,6 +71,137 @@ export interface Exercise {
   thumbnail_url?: string
 }
 
+const DEFAULT_EXERCISES: Exercise[] = [
+  {
+    id: "a1000001-0001-4000-8000-000000000001",
+    name: "Shoulder Flexion",
+    description: "Raise your arm forward and upward",
+    body_part: "shoulder",
+    difficulty: "beginner",
+    angle_config: {
+      joint: "left_shoulder",
+      points: ["left_elbow", "left_shoulder", "left_hip"],
+      target_angle: 160,
+      threshold: 15,
+    },
+    instructions:
+      "Stand with arms at your side. Slowly raise your arm forward to shoulder height, then continue upward as far as comfortable. Lower slowly.",
+    thumbnail_url: "/images/shoulder-flexion.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000002",
+    name: "Shoulder Abduction",
+    description: "Raise your arm out to the side",
+    body_part: "shoulder",
+    difficulty: "beginner",
+    angle_config: {
+      joint: "right_shoulder",
+      points: ["right_elbow", "right_shoulder", "right_hip"],
+      target_angle: 150,
+      threshold: 15,
+    },
+    instructions:
+      "Stand upright with arms at your side. Slowly raise one arm out to the side until it is level with your shoulder. Hold briefly, then lower slowly.",
+    thumbnail_url: "/images/shoulder-abduction.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000003",
+    name: "Elbow Flexion",
+    description: "Bend and straighten your elbow",
+    body_part: "elbow",
+    difficulty: "beginner",
+    angle_config: {
+      joint: "right_elbow",
+      points: ["right_wrist", "right_elbow", "right_shoulder"],
+      target_angle: 45,
+      threshold: 15,
+    },
+    instructions:
+      "Hold your arm at your side with elbow straight. Slowly bend your elbow, bringing your hand toward your shoulder. Straighten slowly and repeat.",
+    thumbnail_url: "/images/elbow-flexion.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000004",
+    name: "Knee Extension",
+    description: "Straighten your knee from a seated position",
+    body_part: "knee",
+    difficulty: "beginner",
+    angle_config: {
+      joint: "right_knee",
+      points: ["right_ankle", "right_knee", "right_hip"],
+      target_angle: 170,
+      threshold: 10,
+    },
+    instructions:
+      "Sit upright on a chair. Slowly straighten your knee until your leg is extended. Hold for 2 seconds, then lower slowly.",
+    thumbnail_url: "/images/knee-extension.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000005",
+    name: "Knee Flexion",
+    description: "Bend your knee as far as comfortable",
+    body_part: "knee",
+    difficulty: "intermediate",
+    angle_config: {
+      joint: "right_knee",
+      points: ["right_ankle", "right_knee", "right_hip"],
+      target_angle: 90,
+      threshold: 15,
+    },
+    instructions:
+      "Stand holding a support. Slowly bend your knee, bringing your heel toward your buttocks. Hold briefly, then lower slowly.",
+    thumbnail_url: "/images/knee-flexion.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000006",
+    name: "Hip Abduction",
+    description: "Raise your leg out to the side",
+    body_part: "hip",
+    difficulty: "intermediate",
+    angle_config: {
+      joint: "right_hip",
+      points: ["right_knee", "right_hip", "left_hip"],
+      target_angle: 30,
+      threshold: 10,
+    },
+    instructions:
+      "Stand upright, holding a support for balance. Slowly raise one leg out to the side, keeping your toe pointed forward. Lower slowly.",
+    thumbnail_url: "/images/hip-abduction.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000007",
+    name: "Shoulder External Rotation",
+    description: "Rotate your shoulder outward with elbow bent",
+    body_part: "shoulder",
+    difficulty: "intermediate",
+    angle_config: {
+      joint: "right_shoulder",
+      points: ["right_wrist", "right_elbow", "right_shoulder"],
+      target_angle: 90,
+      threshold: 15,
+    },
+    instructions:
+      "Hold your elbow at 90° at your side. Rotate your forearm outward, keeping your elbow tucked. Return slowly.",
+    thumbnail_url: "/images/shoulder-external-rotation.png",
+  },
+  {
+    id: "a1000001-0001-4000-8000-000000000008",
+    name: "Straight Leg Raise",
+    description: "Lift your straight leg from a lying position",
+    body_part: "hip",
+    difficulty: "beginner",
+    angle_config: {
+      joint: "right_hip",
+      points: ["right_knee", "right_hip", "left_shoulder"],
+      target_angle: 45,
+      threshold: 10,
+    },
+    instructions:
+      "Lie flat on your back. Keep one knee bent with foot flat. Tighten the thigh of the other leg and raise it to the height of the bent knee. Lower slowly.",
+    thumbnail_url: "/images/straight-leg-raise.png",
+  },
+]
+
 export interface AngleHistoryItem {
   rep: number
   peak_angle: number
@@ -255,16 +386,28 @@ export const usersApi = {
 // ─── Exercises ────────────────────────────────────────────────────────────────
 
 export const exercisesApi = {
-  list: (params?: { body_part?: string; difficulty?: string }) => {
+  list: async (params?: { body_part?: string; difficulty?: string }) => {
     const qs = new URLSearchParams()
     if (params?.body_part) qs.set("body_part", params.body_part)
     if (params?.difficulty) qs.set("difficulty", params.difficulty)
     const query = qs.toString() ? `?${qs}` : ""
-    return requestWithFallback<Exercise[]>(
+    const data = await requestWithFallback<Exercise[]>(
       `/api/exercises${query}`,
-      [],
+      DEFAULT_EXERCISES,
       "Exercises API"
     )
+
+    if (data.length > 0) return data
+
+    if (!params?.body_part && !params?.difficulty) {
+      return DEFAULT_EXERCISES
+    }
+
+    return DEFAULT_EXERCISES.filter((exercise) => {
+      const matchesBodyPart = params?.body_part ? exercise.body_part === params.body_part : true
+      const matchesDifficulty = params?.difficulty ? exercise.difficulty === params.difficulty : true
+      return matchesBodyPart && matchesDifficulty
+    })
   },
   get: (id: string) => request<Exercise>(`/api/exercises/${id}`),
 }
@@ -311,7 +454,7 @@ export const feedbackApi = {
   /** Returns FeedbackResponse (200) or FeedbackProcessing (202). */
   get: async (
     session_id: string,
-    session_type: "exercise" | "game"
+    session_type: "exercise" | "game" | "cognitive_test"
   ): Promise<FeedbackResponse | FeedbackProcessing> => {
     const res = await fetch(
       `${BASE}/api/feedback/${session_id}?session_type=${session_type}`,
@@ -359,3 +502,102 @@ export const progressApi = {
     )
   },
 }
+
+// ─── Cognitive Tests ──────────────────────────────────────────────────────────
+
+export interface CognitiveTestSession {
+  id: string
+  user_id: string
+  test_type: string
+  score: number
+  response_time_ms?: number
+  accuracy?: number
+  transcript?: string
+  expected_response?: string
+  word_count?: number
+  error_count?: number
+  duration_seconds?: number
+  test_metadata?: Record<string, unknown>
+  completed_at: string
+}
+
+export interface CreateCognitiveTestPayload {
+  user_id: string
+  test_type: "memory_recall" | "verbal_fluency" | "attention_reaction" | "sentence_repetition"
+  score: number
+  response_time_ms?: number
+  accuracy?: number
+  transcript?: string
+  expected_response?: string
+  word_count?: number
+  error_count?: number
+  duration_seconds?: number
+  test_metadata?: Record<string, unknown>
+}
+
+export interface CognitiveTestCreateResponse {
+  id: string
+  user_id: string
+  test_type: string
+  score: number
+  accuracy?: number
+  response_time_ms?: number
+  duration_seconds?: number
+  completed_at: string
+  feedback_id: string
+}
+
+export interface CognitiveTestListItem {
+  id: string
+  test_type: string
+  score: number
+  accuracy?: number
+  response_time_ms?: number
+  duration_seconds?: number
+  completed_at: string
+}
+
+export interface CognitiveTestListResponse {
+  sessions: CognitiveTestListItem[]
+  total: number
+}
+
+export interface EvaluateResponsePayload {
+  test_type: string
+  transcript: string
+  expected_response: string
+  test_metadata?: Record<string, unknown>
+}
+
+export interface EvaluateResponseResult {
+  score: number
+  accuracy: number
+  feedback: string
+  corrections: string[]
+  missed_items: string[]
+  extra_items: string[]
+}
+
+export const cognitiveTestsApi = {
+  create: (payload: CreateCognitiveTestPayload) =>
+    request<CognitiveTestCreateResponse>("/api/cognitive-tests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  list: (user_id: string, test_type?: string, limit = 20) => {
+    const qs = new URLSearchParams({ user_id })
+    if (test_type) qs.set("test_type", test_type)
+    qs.set("limit", String(limit))
+    return requestWithFallback<CognitiveTestListResponse>(
+      `/api/cognitive-tests?${qs}`,
+      { sessions: [], total: 0 },
+      "Cognitive tests API"
+    )
+  },
+  evaluate: (payload: EvaluateResponsePayload) =>
+    request<EvaluateResponseResult>("/api/cognitive-tests/evaluate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+}
+

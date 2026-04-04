@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exception_handlers import http_exception_handler
 
-from app.routers import users, exercises, sessions, games, progress, feedback
+from app.routers import users, exercises, sessions, games, progress, feedback, cognitive_tests
 
 app = FastAPI(title="Nakshatra Healthcare API", version="1.0.0")
 
@@ -20,6 +20,7 @@ app.include_router(sessions.router)
 app.include_router(games.router)
 app.include_router(progress.router)
 app.include_router(feedback.router)
+app.include_router(cognitive_tests.router)
 
 
 @app.exception_handler(HTTPException)
