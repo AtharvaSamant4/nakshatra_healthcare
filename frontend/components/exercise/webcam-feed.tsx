@@ -88,7 +88,8 @@ export function WebcamFeed({
   const metricsChangeRef = useRef(onMetricsChange)
   const [demoTick, setDemoTick] = useState(0)
   const [lastTrackedAt, setLastTrackedAt] = useState(0)
-  const [lastRepCount, setLastRepCount] = useState(0)
+  // Use a ref so rep increments don't trigger camera/pose teardown
+  const lastRepCountRef = useRef(0)
   const [returnStepPulseUntil, setReturnStepPulseUntil] = useState(0)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -102,7 +103,7 @@ export function WebcamFeed({
     if (!isActive) {
       resetCounter()
       setLastTrackedAt(0)
-      setLastRepCount(0)
+      lastRepCountRef.current = 0
       setReturnStepPulseUntil(0)
     }
   }, [isActive, resetCounter])
@@ -110,7 +111,7 @@ export function WebcamFeed({
   useEffect(() => {
     resetCounter()
     setLastTrackedAt(0)
-    setLastRepCount(0)
+    lastRepCountRef.current = 0
     setReturnStepPulseUntil(0)
   }, [angleConfig, resetCounter])
 
@@ -183,9 +184,9 @@ export function WebcamFeed({
 
             if (frameOutput && metricsChangeRef.current) {
               setLastTrackedAt(Date.now())
-              if (frameOutput.repCount > lastRepCount) {
+              if (frameOutput.repCount > lastRepCountRef.current) {
                 setReturnStepPulseUntil(Date.now() + 1200)
-                setLastRepCount(frameOutput.repCount)
+                lastRepCountRef.current = frameOutput.repCount
               }
 
               const formQuality: "good" | "bad" | "neutral" =
@@ -253,7 +254,7 @@ export function WebcamFeed({
         stream.getTracks().forEach((track) => track.stop())
       }
     }
-  }, [isActive, lastRepCount, processFrame, showDemo])
+  }, [isActive, processFrame, showDemo])
 
   const poseDetected = isActive && Date.now() - lastTrackedAt < 900
   const targetReached = output.debug.targetReached

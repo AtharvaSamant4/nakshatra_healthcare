@@ -12,7 +12,8 @@ import {
   cleanTranscript,
 } from "@/lib/speech"
 import { cn } from "@/lib/utils"
-import { RotateCcw, Play, AlertCircle, Clock, Hash } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { RotateCcw, Play, AlertCircle, Clock, Hash, Keyboard } from "lucide-react"
 
 const CATEGORIES = [
   { name: "Animals", prompt: "Name as many animals as you can" },
@@ -36,6 +37,8 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
   const [words, setWords] = useState<string[]>([])
   const [currentTranscript, setCurrentTranscript] = useState("")
   const [isSupported, setIsSupported] = useState(true)
+  const [speechFailed, setSpeechFailed] = useState(false)
+  const [typingInput, setTypingInput] = useState("")
   const [result, setResult] = useState<{
     uniqueWords: string[]
     duplicates: string[]
@@ -97,7 +100,10 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
         }
       },
       onError: (err) => {
-        if (err !== "aborted" && err !== "no-speech") {
+        if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailed(true)
+        } else if (err !== "aborted" && err !== "no-speech") {
           console.error("Speech recognition error:", err)
         }
       },
@@ -117,6 +123,19 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
       })
     }, 1000)
   }, [phase, processTranscript])
+
+  const handleTypingInput = useCallback((value: string) => {
+    // When user types a space or comma, treat the previous word as spoken
+    if (value.endsWith(" ") || value.endsWith(",")) {
+      const word = value.trim().replace(/,$/, "")
+      if (word.length > 1) {
+        processTranscript(word)
+      }
+      setTypingInput("")
+    } else {
+      setTypingInput(value)
+    }
+  }, [processTranscript])
 
   const finishTest = useCallback(() => {
     recognitionRef.current?.stop?.()
@@ -215,9 +234,32 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
             {/* Timer progress */}
             <Progress value={(timeLeft / DURATION) * 100} className="h-2" />
 
-            <div className="flex flex-col items-center gap-6">
-              <VoiceVisualizer isRecording={true} size="md" />
-              <p className="text-lg font-semibold text-primary mt-4">{category.prompt}!</p>
+            <div className="flex flex-col items-center gap-4">
+              {speechFailed ? (
+                <>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+                    <Keyboard className="h-6 w-6 text-amber-600" />
+                  </div>
+                  <p className="text-sm text-muted-foreground text-center">
+                    Microphone unavailable — type words and press <kbd className="rounded bg-muted px-1 py-0.5 text-xs font-mono">Space</kbd> after each one
+                  </p>
+                  <Input
+                    autoFocus
+                    className="max-w-xs text-center text-lg"
+                    placeholder="Type a word..."
+                    value={typingInput}
+                    onChange={(e) => handleTypingInput(e.target.value)}
+                  />
+                </>
+              ) : (
+                <>
+                  <VoiceVisualizer isRecording={true} size="md" />
+                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => { recognitionRef.current?.abort?.(); setSpeechFailed(true) }}>
+                    Switch to typing
+                  </Button>
+                </>
+              )}
+              <p className="text-lg font-semibold text-primary">{category.prompt}!</p>
             </div>
 
             {/* Live word count */}

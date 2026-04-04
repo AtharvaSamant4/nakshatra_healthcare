@@ -16,7 +16,8 @@ import {
   tokenize,
 } from "@/lib/speech"
 import { cn } from "@/lib/utils"
-import { RotateCcw, Play, AlertCircle, Volume2, CheckCircle2, XCircle } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { RotateCcw, Play, AlertCircle, Volume2, CheckCircle2, XCircle, Keyboard } from "lucide-react"
 
 const SENTENCES = [
   // Easy (short)
@@ -56,6 +57,8 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
   const [results, setResults] = useState<RoundResult[]>([])
   const [lastRoundResult, setLastRoundResult] = useState<RoundResult | null>(null)
   const [isSupported, setIsSupported] = useState(true)
+  const [speechFailed, setSpeechFailed] = useState(false)
+  const [manualInput, setManualInput] = useState("")
 
   const recognitionRef = useRef<any>(null)
   const sentencesRef = useRef<string[]>([])
@@ -101,6 +104,8 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
 
   const startListening = useCallback(() => {
     setPhase("listening")
+    setSpeechFailed(false)
+    setManualInput("")
     let finalTranscript = ""
 
     const recognition = createSpeechRecognition({
@@ -118,7 +123,10 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
         // Will be stopped manually or auto
       },
       onError: (err) => {
-        if (err !== "no-speech" && err !== "aborted") {
+        if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailed(true)
+        } else if (err !== "no-speech" && err !== "aborted") {
           console.error("Speech error:", err)
         }
       },
@@ -268,18 +276,49 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
 
         {phase === "listening" && (
           <div className="flex flex-col items-center gap-6 py-8">
-            <VoiceVisualizer isRecording={true} size="md" />
-            <div className="text-center mt-4">
-              <p className="text-lg font-semibold text-foreground">Now repeat the sentence!</p>
-              {transcript && (
-                <p className="mt-3 text-sm text-muted-foreground italic max-w-md">
-                  &quot;{transcript}&quot;
+            {speechFailed ? (
+              <>
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+                  <Keyboard className="h-6 w-6 text-amber-600" />
+                </div>
+                <p className="text-base font-semibold text-foreground">Now type the sentence</p>
+                <p className="text-sm text-muted-foreground italic max-w-md text-center">
+                  &quot;{currentSentence}&quot;
                 </p>
-              )}
-            </div>
-            <Button onClick={finishListening} variant="destructive" className="gap-2">
-              Done Speaking
-            </Button>
+                <Textarea
+                  autoFocus
+                  className="w-full max-w-sm"
+                  rows={2}
+                  placeholder="Type the sentence here..."
+                  value={manualInput}
+                  onChange={(e) => { setManualInput(e.target.value); setTranscript(e.target.value) }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finishListening() } }}
+                />
+                <Button onClick={finishListening} disabled={!manualInput.trim()} className="gap-2">
+                  Submit
+                </Button>
+              </>
+            ) : (
+              <>
+                <VoiceVisualizer isRecording={true} size="md" />
+                <div className="text-center mt-4">
+                  <p className="text-lg font-semibold text-foreground">Now repeat the sentence!</p>
+                  {transcript && (
+                    <p className="mt-3 text-sm text-muted-foreground italic max-w-md">
+                      &quot;{transcript}&quot;
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <Button onClick={finishListening} variant="destructive" className="gap-2">
+                    Done Speaking
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { recognitionRef.current?.abort?.(); setSpeechFailed(true) }}>
+                    Type instead
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

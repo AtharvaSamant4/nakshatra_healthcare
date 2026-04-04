@@ -16,7 +16,8 @@ import {
   compareWords,
 } from "@/lib/speech"
 import { cn } from "@/lib/utils"
-import { RotateCcw, Play, Volume2, CheckCircle2, XCircle, AlertCircle } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { RotateCcw, Play, Volume2, CheckCircle2, XCircle, AlertCircle, Keyboard } from "lucide-react"
 
 const WORD_LISTS = {
   easy: [
@@ -60,6 +61,8 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
   const [countdown, setCountdown] = useState(0)
   const [showWords, setShowWords] = useState(false)
   const [isSupported, setIsSupported] = useState(true)
+  const [speechFailed, setSpeechFailed] = useState(false)
+  const [manualInput, setManualInput] = useState("")
 
   const recognitionRef = useRef<any>(null)
   const speechStartTimeRef = useRef<number>(0)
@@ -138,7 +141,12 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
         // Auto-finalize
       },
       onError: (err) => {
-        console.error("Speech recognition error:", err)
+        if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailed(true)
+        } else {
+          console.error("Speech recognition error:", err)
+        }
       },
     })
 
@@ -151,6 +159,12 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
       finishRecording()
     }, 15000)
   }, [])
+
+  const submitManual = useCallback(() => {
+    setTranscript(manualInput)
+    setTimeout(() => finishRecording(), 50)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualInput])
 
   const finishRecording = useCallback(() => {
     recognitionRef.current?.stop?.()
@@ -278,19 +292,49 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
         )}
 
         {phase === "recording" && (
-          <div className="flex flex-col items-center gap-8 py-8">
-            <VoiceVisualizer isRecording={true} size="lg" />
-            <div className="text-center mt-4">
-              <p className="text-lg font-semibold text-foreground">Say the words now!</p>
-              {(transcript || interimTranscript) && (
-                <p className="mt-3 text-sm text-muted-foreground italic">
-                  &quot;{transcript} {interimTranscript}&quot;
-                </p>
-              )}
-            </div>
-            <Button onClick={finishRecording} variant="destructive" className="gap-2">
-              Done Speaking
-            </Button>
+          <div className="flex flex-col items-center gap-6 py-8">
+            {speechFailed ? (
+              <>
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+                  <Keyboard className="h-7 w-7 text-amber-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-base font-semibold text-foreground">Microphone unavailable</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Type the words you remember, separated by spaces or commas</p>
+                </div>
+                <Textarea
+                  className="w-full max-w-sm"
+                  rows={3}
+                  placeholder="e.g. apple chair river"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitManual() } }}
+                />
+                <Button onClick={submitManual} disabled={!manualInput.trim()} className="gap-2">
+                  Submit Answer
+                </Button>
+              </>
+            ) : (
+              <>
+                <VoiceVisualizer isRecording={true} size="lg" />
+                <div className="text-center mt-4">
+                  <p className="text-lg font-semibold text-foreground">Say the words now!</p>
+                  {(transcript || interimTranscript) && (
+                    <p className="mt-3 text-sm text-muted-foreground italic">
+                      &quot;{transcript} {interimTranscript}&quot;
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <Button onClick={finishRecording} variant="destructive" className="gap-2">
+                    Done Speaking
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { recognitionRef.current?.abort?.(); setSpeechFailed(true) }}>
+                    Type instead
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
