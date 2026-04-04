@@ -38,6 +38,7 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
   const [currentTranscript, setCurrentTranscript] = useState("")
   const [isSupported, setIsSupported] = useState(true)
   const [speechFailed, setSpeechFailed] = useState(false)
+  const [speechFailReason, setSpeechFailReason] = useState<"mic" | "network">("network")
   const [typingInput, setTypingInput] = useState("")
   const [result, setResult] = useState<{
     uniqueWords: string[]
@@ -68,7 +69,18 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
     }
   }, [])
 
-  const startTest = useCallback(() => {
+  const startTest = useCallback(async () => {
+    // Check mic permission before starting
+    try {
+      const perm = await navigator.permissions.query({ name: "microphone" as PermissionName })
+      if (perm.state === "denied") {
+        setSpeechFailReason("mic")
+        setSpeechFailed(true)
+      }
+    } catch {
+      // permissions API not supported — speech recognition will handle errors
+    }
+
     setPhase("recording")
     setTimeLeft(DURATION)
     setWords([])
@@ -100,8 +112,13 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
         }
       },
       onError: (err) => {
-        if (err === "network") {
+        if (err === "not-allowed" || err === "audio-capture") {
           recognitionRef.current?.abort?.()
+          setSpeechFailReason("mic")
+          setSpeechFailed(true)
+        } else if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailReason("network")
           setSpeechFailed(true)
         } else if (err !== "aborted" && err !== "no-speech") {
           console.error("Speech recognition error:", err)
@@ -240,9 +257,15 @@ export function VerbalFluencyTest({ onComplete }: VerbalFluencyTestProps) {
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
                     <Keyboard className="h-6 w-6 text-amber-600" />
                   </div>
-                  <p className="text-sm text-muted-foreground text-center">
-                    Microphone unavailable — type words and press <kbd className="rounded bg-muted px-1 py-0.5 text-xs font-mono">Space</kbd> after each one
-                  </p>
+                  {speechFailReason === "mic" ? (
+                    <p className="text-sm text-muted-foreground text-center">
+                      Microphone access denied — enable it in browser settings and reload, or type words and press <kbd className="rounded bg-muted px-1 py-0.5 text-xs font-mono">Space</kbd> after each one
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center">
+                      Voice recognition unavailable (needs internet) — type words and press <kbd className="rounded bg-muted px-1 py-0.5 text-xs font-mono">Space</kbd> after each one
+                    </p>
+                  )}
                   <Input
                     autoFocus
                     className="max-w-xs text-center text-lg"

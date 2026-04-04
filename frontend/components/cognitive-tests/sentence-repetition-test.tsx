@@ -58,6 +58,7 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
   const [lastRoundResult, setLastRoundResult] = useState<RoundResult | null>(null)
   const [isSupported, setIsSupported] = useState(true)
   const [speechFailed, setSpeechFailed] = useState(false)
+  const [speechFailReason, setSpeechFailReason] = useState<"mic" | "network">("network")
   const [manualInput, setManualInput] = useState("")
 
   const recognitionRef = useRef<any>(null)
@@ -102,10 +103,22 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
     })
   }, [])
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     setPhase("listening")
     setSpeechFailed(false)
     setManualInput("")
+
+    // Pre-check mic permission
+    try {
+      const perm = await navigator.permissions.query({ name: "microphone" as PermissionName })
+      if (perm.state === "denied") {
+        setSpeechFailReason("mic")
+        setSpeechFailed(true)
+        return
+      }
+    } catch {
+      // permissions API not supported — proceed
+    }
     let finalTranscript = ""
 
     const recognition = createSpeechRecognition({
@@ -123,8 +136,13 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
         // Will be stopped manually or auto
       },
       onError: (err) => {
-        if (err === "network") {
+        if (err === "not-allowed" || err === "audio-capture") {
           recognitionRef.current?.abort?.()
+          setSpeechFailReason("mic")
+          setSpeechFailed(true)
+        } else if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailReason("network")
           setSpeechFailed(true)
         } else if (err !== "no-speech" && err !== "aborted") {
           console.error("Speech error:", err)
@@ -281,7 +299,18 @@ export function SentenceRepetitionTest({ onComplete }: SentenceRepetitionTestPro
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
                   <Keyboard className="h-6 w-6 text-amber-600" />
                 </div>
-                <p className="text-base font-semibold text-foreground">Now type the sentence</p>
+                <p className="text-base font-semibold text-foreground">
+                  {speechFailReason === "mic" ? "Microphone Access Denied" : "Voice Recognition Unavailable"}
+                </p>
+                {speechFailReason === "mic" ? (
+                  <p className="text-sm text-muted-foreground max-w-md text-center">
+                    Enable microphone in browser settings and reload, or type the sentence below
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground max-w-md text-center">
+                    Speech-to-text needs an internet connection. Type the sentence below instead.
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground italic max-w-md text-center">
                   &quot;{currentSentence}&quot;
                 </p>

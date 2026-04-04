@@ -62,6 +62,7 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
   const [showWords, setShowWords] = useState(false)
   const [isSupported, setIsSupported] = useState(true)
   const [speechFailed, setSpeechFailed] = useState(false)
+  const [speechFailReason, setSpeechFailReason] = useState<"mic" | "network">("network")
   const [manualInput, setManualInput] = useState("")
 
   const recognitionRef = useRef<any>(null)
@@ -114,7 +115,20 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
     })
   }, [difficulty, getRandomList])
 
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
+    // Check mic permission before starting
+    try {
+      const perm = await navigator.permissions.query({ name: "microphone" as PermissionName })
+      if (perm.state === "denied") {
+        setPhase("recording")
+        setSpeechFailReason("mic")
+        setSpeechFailed(true)
+        return
+      }
+    } catch {
+      // permissions API not supported — proceed and let speech recognition handle it
+    }
+
     setPhase("recording")
     questionEndTimeRef.current = Date.now()
     let finalTranscript = ""
@@ -141,10 +155,15 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
         // Auto-finalize
       },
       onError: (err) => {
-        if (err === "network") {
+        if (err === "not-allowed" || err === "audio-capture") {
           recognitionRef.current?.abort?.()
+          setSpeechFailReason("mic")
           setSpeechFailed(true)
-        } else {
+        } else if (err === "network") {
+          recognitionRef.current?.abort?.()
+          setSpeechFailReason("network")
+          setSpeechFailed(true)
+        } else if (err !== "no-speech" && err !== "aborted") {
           console.error("Speech recognition error:", err)
         }
       },
@@ -299,8 +318,17 @@ export function MemoryRecallTest({ onComplete }: MemoryRecallTestProps) {
                   <Keyboard className="h-7 w-7 text-amber-600" />
                 </div>
                 <div className="text-center">
-                  <p className="text-base font-semibold text-foreground">Microphone unavailable</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Type the words you remember, separated by spaces or commas</p>
+                  {speechFailReason === "mic" ? (
+                    <>
+                      <p className="text-base font-semibold text-foreground">Microphone Access Denied</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Enable microphone in browser settings and reload, or type below</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-base font-semibold text-foreground">Voice Recognition Unavailable</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Speech-to-text needs an internet connection. Type the words you remember below.</p>
+                    </>
+                  )}
                 </div>
                 <Textarea
                   className="w-full max-w-sm"
