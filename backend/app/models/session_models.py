@@ -20,6 +20,7 @@ class SessionCreate(BaseModel):
     angle_history: Optional[list[AngleHistoryItem]] = None
     started_at: datetime
     completed_at: datetime
+    prescription_id: Optional[str] = None  # V2: link session to a prescription
 
 
 class SessionCreateResponse(BaseModel):

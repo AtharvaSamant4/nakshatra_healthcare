@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter, Query
 from app.models.session_models import (
     SessionCreate,
@@ -17,13 +18,15 @@ def create_session(payload: SessionCreate):
 
 @router.get("", response_model=SessionListResponse)
 def list_sessions(
-    user_id: str = Query(...),
+    user_id: UUID = Query(...),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return session_service.list_sessions(user_id=user_id, limit=limit, offset=offset)
+    return session_service.list_sessions(
+        user_id=str(user_id), limit=limit, offset=offset
+    )
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-def get_session(session_id: str):
-    return session_service.get_session(session_id)
+def get_session(session_id: UUID):
+    return session_service.get_session(str(session_id))

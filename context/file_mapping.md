@@ -1,123 +1,79 @@
-# File Mapping
+# File Mapping (V2)
 
-> Feature → File mapping for the entire system.  
-> **Paths below match the current repo layout** (`frontend/app`, `frontend/lib`, `frontend/components`).
-
----
-
-## Exercise Flow
-
-| Step | File(s) |
-|---|---|
-| Dashboard (also home `/`) | `frontend/app/page.tsx` |
-| Live exercise session | `frontend/app/exercise/page.tsx` |
-| Webcam surface | `frontend/components/exercise/webcam-feed.tsx` |
-| Session controls + rep UI | `frontend/components/exercise/exercise-controls.tsx` |
-| Post-session summary card | `frontend/components/exercise/session-summary.tsx` |
-| Save session (API) | `frontend/lib/api.ts` → `sessionsApi.create` → `POST /api/sessions` |
-| Sessions API router | `backend/app/routers/sessions.py` |
-| Session service logic | `backend/app/services/session_service.py` |
-| Session Pydantic models | `backend/app/models/session_models.py` |
-
-> **See also:** `context/known_integration_gaps.md` for contract/UI/backend drift (users bootstrap, feedback polling, pattern game, etc.).
+> Routes use **`frontend/app`** (App Router). API calls go through **`frontend/lib/api.ts`**. Backend entry: **`backend/app/main.py`**.
 
 ---
 
-## Cognitive Games Flow
+## Role & hospital workflow
 
-| Step | File(s) |
-|---|---|
-| Games hub (Memory + Reaction tabs) | `frontend/app/games/page.tsx` |
-| Memory game | `frontend/components/games/memory-game.tsx` |
-| Reaction game | `frontend/components/games/reaction-game.tsx` |
-| Save game session | `frontend/lib/api.ts` → `gameSessionsApi.create` → `POST /api/game-sessions` |
-| Games API router | `backend/app/routers/games.py` |
-| Game service logic | `backend/app/services/game_service.py` |
-| Game Pydantic models | `backend/app/models/game_models.py` |
-
-> **Contract vs UI:** API supports `game_type: "pattern"`; current UI does not expose a Pattern game.
-
----
-
-## AI Feedback Flow
-
-| Step | File(s) |
-|---|---|
-| Recent feedback on dashboard | `frontend/components/dashboard/ai-insights.tsx` (data from `GET /api/progress/{user_id}`) |
-| Recent feedback on results | `frontend/components/results/ai-feedback.tsx` (same source) |
-| Fetch feedback by session | `frontend/lib/api.ts` → `feedbackApi.get` → `GET /api/feedback/{session_id}?session_type=` |
-| Feedback API router | `backend/app/routers/feedback.py` |
-| Feedback service | `backend/app/services/feedback_service.py` |
-| Gemini integration | `backend/app/services/gemini_service.py` |
-| Feedback models | `backend/app/models/feedback_models.py` |
-
-> **Gap:** `feedbackApi` exists but is **not** wired from exercise/game completion UI; `feedback_id` from `POST` responses is largely unused. Dashboard/results show **aggregated** `recent_feedback` from progress, not per-session poll.
+| Feature | Frontend | Backend |
+|--------|----------|---------|
+| Role + identity picker (`/`) | `frontend/app/page.tsx` — `staffApi.list`, `patientsApi.list`, `useApp().setSession` | `GET /api/staff`, `GET /api/patients` |
+| Session persistence | `frontend/lib/app-context.tsx` — `sessionStorage` key `rehab_v2_session` | — |
+| Reception — register patient | `frontend/app/reception/page.tsx` — `POST /api/patients`, doctor dropdown from staff | `routers/patients.py`, `services/patient_service.py` |
+| Doctor — patient list | `frontend/app/doctor/page.tsx` — list + client filter by `doctor_id` + fallback | `GET /api/patients` |
+| Doctor — chart / Rx | `frontend/app/doctor/[patientId]/page.tsx` — `patientsApi.get/update`, `prescriptionsApi.*` | `patients`, `prescriptions` routers |
+| Doctor — messages | `frontend/app/doctor/[patientId]/messages/page.tsx` | `routers/messages.py` |
+| Patient — hub | `frontend/app/patient/page.tsx` | progress, navigation |
+| Patient — exercise | `frontend/app/patient/exercise/page.tsx` | `sessionsApi`, `exercisesApi` |
+| Patient — games | `frontend/app/patient/games/page.tsx` | `gameSessionsApi` |
+| Patient — messages | `frontend/app/patient/messages/page.tsx` | `messagesApi` |
 
 ---
 
-## Dashboard / Progress Flow
+## Legacy / shared rehab pages (still in tree)
 
-| Step | File(s) |
-|---|---|
-| Dashboard | `frontend/app/page.tsx` |
-| Progress chart | `frontend/components/dashboard/progress-chart.tsx` |
-| Recent sessions | `frontend/components/dashboard/recent-sessions.tsx` |
-| Stats cards | `frontend/components/dashboard/stats-card.tsx` |
-| Results overview | `frontend/app/results/page.tsx` |
-| Weekly-style chart (uses `exercise_progress` dates) | `frontend/components/results/weekly-chart.tsx` |
-| Fetch dashboard aggregate | `frontend/lib/api.ts` → `progressApi.get` → `GET /api/progress/{user_id}` |
-| Exercise trend (optional charts) | `frontend/lib/api.ts` → `progressApi.trend` → `GET /api/progress/{user_id}/exercise-trend` (**not used by current chart components**) |
-| Progress router | `backend/app/routers/progress.py` |
-| Progress service | `backend/app/services/progress_service.py` |
+| Route | File | Notes |
+|-------|------|--------|
+| `/exercise` | `frontend/app/exercise/page.tsx` | Exercise flow (not under `/patient` prefix) |
+| `/games` | `frontend/app/games/page.tsx` | Games hub |
+| `/results` | `frontend/app/results/page.tsx` | Progress / results UI |
 
 ---
 
-## User Management Flow
+## Core API ↔ backend modules
 
-| Step | File(s) |
-|---|---|
-| User context + bootstrap list | `frontend/lib/user-context.tsx` → `usersApi.list()` |
-| User switcher | `frontend/components/navbar.tsx` |
-| Create user API (contract) | `frontend/lib/api.ts` → `usersApi.create` → `POST /api/users` |
-| Users router / service | `backend/app/routers/users.py`, `backend/app/services/user_service.py` |
-
-> **Gap:** No page or flow calls `usersApi.create`. Empty `users` table ⇒ `selectedUserId` stays `null` ⇒ most API-backed features never fire.
-
----
-
-## Shared / Layout
-
-| Component | File |
-|---|---|
-| Root layout + `UserProvider` | `frontend/app/layout.tsx` |
-| Global styles | `frontend/app/globals.css` |
-| App shell + navbar | `frontend/components/app-layout.tsx` |
-| API client + types | `frontend/lib/api.ts` |
-| Utilities | `frontend/lib/utils.ts` |
-| Legacy mock exports (unused) | `frontend/lib/mock-data.ts` |
+| Endpoint prefix | Router | Service (typical) |
+|-----------------|--------|-------------------|
+| `/api/users` | `backend/app/routers/users.py` | `user_service` → `patients` table post-migration |
+| `/api/exercises` | `routers/exercises.py` | `exercise_service.py` |
+| `/api/sessions` | `routers/sessions.py` | `session_service.py` |
+| `/api/game-sessions` | `routers/games.py` | `game_service.py` |
+| `/api/progress` | `routers/progress.py` | `progress_service.py` |
+| `/api/feedback` | `routers/feedback.py` | `feedback_service.py` + `gemini_service.py` |
 
 ---
 
-## Backend Infrastructure
+## V2 API ↔ backend modules
 
-| Component | File |
-|---|---|
-| FastAPI entry | `backend/app/main.py` |
-| Supabase client | `backend/app/db/supabase_client.py` |
-| Settings / env | `backend/app/config/settings.py` |
-| Canonical DDL + seed | `schema.sql` (repo root) |
-| JSON exercise seed (optional import) | `backend/seed/exercises.json` |
-| Dependencies | `backend/requirements.txt` |
+| Endpoint prefix | Router | Service (typical) |
+|-----------------|--------|-------------------|
+| `/api/staff` | `routers/staff.py` | `staff_service.py` |
+| `/api/patients` | `routers/patients.py` | `patient_service.py` |
+| `/api/prescriptions` | `routers/prescriptions.py` | `prescription_service.py` |
+| `/api/messages` | `routers/messages.py` | `message_service.py` |
 
 ---
 
-## Backend Models (Pydantic)
+## Shared UI & infra
 
-| File | Classes |
-|---|---|
-| `user_models.py` | `UserCreate`, `UserResponse`, `UserListItem` |
-| `exercise_models.py` | `AngleConfig`, `ExerciseResponse` |
-| `session_models.py` | `AngleHistoryItem`, `SessionCreate`, `SessionCreateResponse`, `SessionDetail`, `SessionListItem`, `SessionListResponse` |
-| `game_models.py` | `GameSessionCreate`, `GameSessionCreateResponse`, `GameSessionListItem`, `GameSessionListResponse` |
-| `feedback_models.py` | `FeedbackResponse`, `FeedbackProcessing` |
-| `progress_models.py` | `ProgressSummary`, `ExerciseProgressDay`, `GameProgressDay`, `RecentFeedbackItem`, `BodyPartBreakdownItem`, `ProgressResponse`, `ExerciseTrendDay`, `ExerciseTrendResponse` |
+| Concern | Location |
+|---------|----------|
+| Root layout + `AppProvider` | `frontend/app/layout.tsx` |
+| shadcn-style primitives | `frontend/components/ui/*` |
+| Exercise components | `frontend/components/exercise/*` |
+| Games components | `frontend/components/games/*` |
+| Dashboard components | `frontend/components/dashboard/*` |
+| App shell / nav | `frontend/components/app-layout.tsx`, `navbar.tsx` |
+| Env / Supabase | `backend/app/config/settings.py`, `backend/app/db/supabase_client.py` |
+| DDL | `schema.sql`, `migration_v2.sql` (repo root) |
+
+---
+
+## Pydantic / types
+
+| Backend | Frontend |
+|---------|----------|
+| `backend/app/models/*.py` | `frontend/lib/api.ts` interfaces |
+
+For residual contract/UI mismatches, see `context/known_integration_gaps.md`.

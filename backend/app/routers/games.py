@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query
+from uuid import UUID
 from typing import Optional
+from fastapi import APIRouter, Query
 from app.models.game_models import (
     GameSessionCreate,
     GameSessionCreateResponse,
@@ -17,8 +18,10 @@ def create_game_session(payload: GameSessionCreate):
 
 @router.get("", response_model=GameSessionListResponse)
 def list_game_sessions(
-    user_id: str = Query(...),
+    user_id: UUID = Query(...),
     game_type: Optional[str] = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
 ):
-    return game_service.list_game_sessions(user_id=user_id, game_type=game_type, limit=limit)
+    return game_service.list_game_sessions(
+        user_id=str(user_id), game_type=game_type, limit=limit
+    )

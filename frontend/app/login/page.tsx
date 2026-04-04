@@ -1,0 +1,151 @@
+"use client"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { useApp } from "@/lib/app-context"
+import { authApi } from "@/lib/api"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Building2, KeyRound, Mail } from "lucide-react"
+
+export default function LoginPage() {
+  const { setSession } = useApp()
+  const router = useRouter()
+
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError("")
+
+    try {
+      const res = await authApi.login({ email, password })
+      if (res.role === "patient") {
+        setSession("patient", { 
+          id: res.user.id, 
+          name: res.user.name, 
+          status: res.user.status, 
+          doctor_id: res.user.doctor_id 
+        })
+        router.push("/patient")
+      } else if (res.role === "doctor") {
+        setSession("doctor", { 
+          id: res.user.id, 
+          name: res.user.name, 
+          role: "doctor", 
+          specialization: res.user.specialization 
+        })
+        router.push("/doctor")
+      } else if (res.role === "receptionist") {
+        setSession("receptionist", { 
+          id: res.user.id, 
+          name: res.user.name, 
+          role: "receptionist" 
+        })
+        router.push("/reception")
+      }
+    } catch (err: any) {
+      setError(err.message || "Invalid credentials")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
+      <div className="mb-8 flex items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary">
+          <Building2 className="h-6 w-6 text-primary-foreground" />
+        </div>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">RehabAI</h1>
+          <p className="text-sm text-muted-foreground">Hospital Rehabilitation System</p>
+        </div>
+      </div>
+
+      <Card className="w-full max-w-md shadow-lg border-primary/10">
+        <CardHeader className="space-y-1 align-center">
+          <CardTitle className="text-2xl text-center">Welcome back</CardTitle>
+          <CardDescription className="text-center">
+            Sign in to your account to continue
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none" htmlFor="email">
+                Email
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 items-center top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="m@example.com"
+                  className="pl-9"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium leading-none" htmlFor="password">
+                  Password
+                </label>
+                <a href="#" className="text-sm font-medium text-primary hover:underline">
+                  Forgot password?
+                </a>
+              </div>
+              <div className="relative">
+                <KeyRound className="absolute left-3 items-center top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  className="pl-9"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="rounded bg-destructive/15 p-3 text-sm text-destructive font-medium border border-destructive/30">
+                {error}
+              </div>
+            )}
+
+            <Button className="w-full mt-6" type="submit" disabled={loading}>
+              {loading ? "Signing in..." : "Sign In"}
+            </Button>
+          </form>
+
+          <div className="mt-6">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">Demo Credentials</span>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-muted-foreground">
+              <p> <b>Doctor:</b> drsmoke@test.local / any</p>
+              <p> <b>Patient:</b> aarav@gmail.com / any</p>
+              <p> <b>Receptionist:</b> receptionist@test.local / any</p>
+              <p className="mt-2 text-primary/80 italic">Any password will work for demo</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

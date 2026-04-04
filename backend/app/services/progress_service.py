@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException
@@ -12,6 +13,8 @@ from app.models.progress_models import (
     ExerciseTrendResponse,
     ExerciseTrendDay,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _date_str(ts: str) -> str:
@@ -37,11 +40,22 @@ def _compute_streak(active_dates: set[str]) -> int:
     return streak
 
 
+def _user_table(supabase) -> str:
+    """Return 'patients' after migration, 'users' before it."""
+    try:
+        supabase.table("patients").select("id").limit(1).execute()
+        return "patients"
+    except Exception:
+        logger.info("patients table not found, falling back to users for progress check")
+        return "users"
+
+
 def get_progress(user_id: str) -> ProgressResponse:
     supabase = get_supabase()
 
-    # --- Verify user exists ---
-    user_check = supabase.table("users").select("id").eq("id", user_id).execute()
+    # --- Verify user/patient exists (safe before and after migration) ---
+    table = _user_table(supabase)
+    user_check = supabase.table(table).select("id").eq("id", user_id).execute()
     if not user_check.data:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -121,7 +135,6 @@ def get_progress(user_id: str) -> ProgressResponse:
     ]
 
     # --- Game progress by day + game_type ---
-    # Key: (date, game_type)
     game_by_day: dict[tuple, dict] = defaultdict(lambda: {"scores": [], "accuracies": []})
     for s in game_sessions:
         if not s.get("completed_at"):
@@ -228,3 +241,27 @@ def get_exercise_trend(
     ]
 
     return ExerciseTrendResponse(trend=trend)
+
+def get_improvement(user_id: str) -> dict:
+    from app.db.supabase_client import get_supabase
+    from datetime import datetime, timezone, timedelta
+    supabase = get_supabase()
+    now = datetime.now(timezone.utc)
+    current_start = (now - timedelta(days=7)).isoformat()
+    previous_start = (now - timedelta(days=14)).isoformat()
+    
+    cur_resp = supabase.table("exercise_sessions").select("form_score").eq("user_id", user_id).gte("completed_at", current_start).lte("completed_at", now.isoformat()).execute()
+    cur_scores = [r["form_score"] for r in (cur_resp.data or []) if r.get("form_score") is not None]
+    
+    prev_resp = supabase.table("exercise_sessions").select("form_score").eq("user_id", user_id).gte("completed_at", previous_start).lt("completed_at", current_start).execute()
+    prev_scores = [r["form_score"] for r in (prev_resp.data or []) if r.get("form_score") is not None]
+    
+    cur_avg = sum(cur_scores) / len(cur_scores) if cur_scores else 0
+    prev_avg = sum(prev_scores) / len(prev_scores) if prev_scores else 0
+    
+    if prev_avg == 0:
+        improvement = 100 if cur_avg > 0 else 0
+    else:
+        improvement = round(((cur_avg - prev_avg) / prev_avg) * 100)
+        
+    return {"improvement": improvement}

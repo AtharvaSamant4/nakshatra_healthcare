@@ -1,164 +1,127 @@
-# Database Schema
+# Database Schema (Post-V2)
 
-> Supabase PostgreSQL · 5 tables · UUID primary keys · timestamptz timestamps
-> **Canonical SQL file:** `schema.sql` (repo root) — run this in Supabase SQL Editor to create everything.
+> **Physical bootstrap:** run `schema.sql` in Supabase, then `migration_v2.sql` in order (see file headers).  
+> After migration the primary person table is **`patients`** (renamed from `users`). Foreign keys on child tables still use the column name **`user_id`** (patient id).
 
 ---
 
-## Entity Relationships
+## Entity relationships
 
 ```
-users ──┬── 1:N ──→ exercise_sessions ──── 1:0..1 ──→ ai_feedback
+staff ──┬── optional ←── patients.doctor_id
         │
-        ├── 1:N ──→ game_sessions ──────── 1:0..1 ──→ ai_feedback
-        │
-        └── 1:N ──→ ai_feedback (via user_id)
+        └── prescriptions.doctor_id
 
-exercises ── 1:N ──→ exercise_sessions (via exercise_id)
+patients ──┬── 1:N ── exercise_sessions (user_id → patients.id)
+           ├── 1:N ── game_sessions (user_id)
+           ├── 1:N ── ai_feedback (user_id)
+           ├── 1:N ── prescriptions (patient_id)
+           └── 1:N ── messages (patient_id)
+
+exercises ── 1:N ── exercise_sessions
+exercises ── optional ←── prescriptions.exercise_id
+
+prescriptions ── optional ←── exercise_sessions.prescription_id
+
+ai_feedback.session_id → polymorphic (exercise_sessions.id OR game_sessions.id) + session_type
 ```
 
-`ai_feedback.session_id` is a **polymorphic FK** — it points to either `exercise_sessions.id` or `game_sessions.id`, disambiguated by `session_type`.
-
-All child-table FKs use `ON DELETE CASCADE` — deleting a user removes all their sessions and feedback.
-
 ---
 
-## Table: `users`
+## Tables (logical, post-migration)
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `name` | `text` | NOT NULL | Display name |
-| `email` | `text` | UNIQUE, nullable | Optional for V1 |
-| `age` | `int` | nullable | For age-adjusted feedback |
-| `condition_notes` | `text` | nullable | E.g. "left knee ACL recovery" |
-| `created_at` | `timestamptz` | default `now()` | |
+### `patients` (was `users` before migration)
 
----
+| Column | Type | Notes |
+|--------|------|--------|
+| id | uuid PK | `gen_random_uuid()` |
+| name | text NOT NULL | |
+| email | text UNIQUE | nullable |
+| age | int | nullable |
+| condition_notes | text | nullable |
+| created_at | timestamptz | default now() |
+| doctor_id | uuid FK → staff(id) | ON DELETE SET NULL, nullable |
+| status | text NOT NULL | default `registered` |
+| diagnosis, injury_type, severity | text | nullable |
+| emergency | boolean NOT NULL | default false |
+| phone | text | nullable |
 
-## Table: `exercises` (Seed data — pre-populated)
+### `staff`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | `uuid` | PK | |
-| `name` | `text` | NOT NULL | E.g. "Shoulder Flexion" |
-| `description` | `text` | | Short description |
-| `body_part` | `text` | NOT NULL | `"shoulder"`, `"knee"`, `"elbow"`, `"hip"` |
-| `difficulty` | `text` | default `'beginner'` | `"beginner"`, `"intermediate"`, `"advanced"` |
-| `angle_config` | `jsonb` | NOT NULL | See format below |
-| `instructions` | `text` | | Step-by-step text |
-| `thumbnail_url` | `text` | nullable | Static image URL |
+| Column | Type | Notes |
+|--------|------|--------|
+| id | uuid PK | |
+| name | text NOT NULL | |
+| email | text UNIQUE | nullable |
+| role | text NOT NULL | `doctor` \| `receptionist` |
+| specialization | text | nullable |
+| created_at | timestamptz | |
 
-**`angle_config` format:**
-```json
-{
-  "joint": "left_shoulder",
-  "points": ["left_elbow", "left_shoulder", "left_hip"],
-  "target_angle": 160,
-  "threshold": 15
-}
-```
+### `prescriptions`
 
-**Seed data:** 8 exercises across shoulder/elbow/knee/hip. Defined as SQL INSERTs in `schema.sql` and also available as `backend/seed/exercises.json` for programmatic import.
+| Column | Type | Notes |
+|--------|------|--------|
+| id | uuid PK | |
+| patient_id | uuid FK → patients | ON DELETE CASCADE |
+| doctor_id | uuid FK → staff | ON DELETE CASCADE |
+| exercise_id | uuid FK → exercises | nullable |
+| game_type | text | nullable (`memory` \| `reaction` \| `pattern`) |
+| target_reps, target_sets | int | nullable |
+| frequency | text | nullable |
+| priority | text NOT NULL | default `normal` |
+| notes | text | nullable |
+| status | text NOT NULL | default `active` |
+| created_at | timestamptz | |
 
-**Thumbnail path drift:** `schema.sql` seed rows use `thumbnail_url` paths like `/images/exercises/<name>.png`. `backend/seed/exercises.json` currently uses `/images/<name>.png` (no `exercises/` segment). Align URLs if you import from JSON so the frontend and CDN stay consistent.
+### `messages`
 
----
+| Column | Type | Notes |
+|--------|------|--------|
+| id | uuid PK | |
+| patient_id | uuid FK → patients | ON DELETE CASCADE |
+| sender_type | text NOT NULL | `patient` \| `doctor` |
+| sender_id | uuid NOT NULL | patients.id or staff.id |
+| content | text NOT NULL | |
+| created_at | timestamptz | |
 
-## Table: `exercise_sessions`
+### `exercises`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
-| `exercise_id` | `uuid` | FK → `exercises.id` ON DELETE CASCADE, NOT NULL | |
-| `reps_completed` | `int` | NOT NULL | |
-| `avg_angle` | `double precision` | | Average peak angle across reps |
-| `min_angle` | `double precision` | | Min angle reached |
-| `max_angle` | `double precision` | | Max angle reached |
-| `form_score` | `double precision` | | 0.0 – 1.0 scale |
-| `duration_seconds` | `int` | | Total session time |
-| `angle_history` | `jsonb` | nullable | `[{ "rep": 1, "peak_angle": 155 }, ...]` |
-| `started_at` | `timestamptz` | NOT NULL | |
-| `completed_at` | `timestamptz` | NOT NULL | |
+Catalog: name, description, body_part, difficulty, angle_config (jsonb), instructions, thumbnail_url. Seeded in `schema.sql`.
 
----
+### `exercise_sessions`
 
-## Table: `game_sessions`
+| Column | Type | Notes |
+|--------|------|--------|
+| user_id | uuid FK | **patient id** |
+| exercise_id | uuid FK | |
+| reps_completed | int NOT NULL | |
+| avg_angle, min_angle, max_angle, form_score | double precision | nullable |
+| duration_seconds | int | nullable |
+| angle_history | jsonb | nullable |
+| started_at, completed_at | timestamptz | NOT NULL |
+| prescription_id | uuid FK → prescriptions | nullable (V2) |
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
-| `game_type` | `text` | NOT NULL | `"memory"`, `"reaction"`, `"pattern"` |
-| `score` | `int` | NOT NULL | Final score |
-| `accuracy` | `double precision` | nullable | 0.0 – 1.0 |
-| `avg_reaction_ms` | `double precision` | nullable | For reaction game |
-| `level_reached` | `int` | nullable | For pattern game |
-| `duration_seconds` | `int` | | |
-| `game_metadata` | `jsonb` | nullable | Game-specific extra data |
-| `completed_at` | `timestamptz` | default `now()` | |
+### `game_sessions`
 
----
+user_id (patient), game_type, score, accuracy, avg_reaction_ms, level_reached, duration_seconds, game_metadata (jsonb), completed_at.
 
-## Table: `ai_feedback`
+### `ai_feedback`
 
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
-| `session_id` | `uuid` | NOT NULL | Points to `exercise_sessions.id` or `game_sessions.id` |
-| `session_type` | `text` | NOT NULL | `"exercise"` or `"game"` |
-| `summary` | `text` | | Gemini-generated summary |
-| `tips` | `jsonb` | | Array of strings |
-| `encouragement` | `text` | | Motivational message |
-| `focus_areas` | `jsonb` | | Array of strings |
-| `recovery_score` | `int` | | 1–10 scale |
-| `created_at` | `timestamptz` | default `now()` | |
-
----
-
-## SQL Reference
-
-> **DO NOT copy SQL from this file.** Use the canonical `schema.sql` in the repo root.
-> It contains the complete DDL (tables + indexes + seed INSERTs) ready to paste into Supabase SQL Editor.
-
-The SQL below is a **summary** for quick reference only:
-
-```sql
--- Required extension
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
--- 5 tables: users, exercises, exercise_sessions, game_sessions, ai_feedback
--- All FKs use ON DELETE CASCADE
--- Float columns use `double precision` (PostgreSQL standard)
--- See schema.sql for full CREATE TABLE statements
-```
+user_id (patient), session_id, session_type (`exercise` \| `game`), summary, tips (jsonb), encouragement, focus_areas (jsonb), recovery_score, created_at.
 
 ---
 
 ## Indexes
 
-```sql
-CREATE INDEX idx_exercise_sessions_user ON exercise_sessions(user_id);
-CREATE INDEX idx_exercise_sessions_exercise ON exercise_sessions(exercise_id);
-CREATE INDEX idx_exercise_sessions_completed_at ON exercise_sessions(completed_at DESC);
-CREATE INDEX idx_game_sessions_user ON game_sessions(user_id);
-CREATE INDEX idx_game_sessions_completed_at ON game_sessions(completed_at DESC);
-CREATE INDEX idx_ai_feedback_session ON ai_feedback(session_id);
-CREATE INDEX idx_ai_feedback_user ON ai_feedback(user_id);
-```
-
-7 indexes total. The `completed_at DESC` indexes enable efficient "most recent sessions first" queries used by the progress service.
+See `migration_v2.sql` Section 6 and `schema.sql` base indexes on sessions and feedback. Notable: `idx_exercise_sessions_prescription`, `idx_patients_doctor`, `idx_prescriptions_patient`.
 
 ---
 
-## Schema Notes
+## SQL sources
 
-| Topic | Detail |
-|---|---|
-| **Float type** | PostgreSQL `double precision` (8 bytes). Pydantic models use Python `float`. API contract uses JSON numbers. All are compatible. |
-| **ON DELETE CASCADE** | Deleting a user cascades to all their sessions and feedback. Safe for demo; review for production. |
-| **pgcrypto extension** | Required for `gen_random_uuid()` on Supabase. Already enabled on most Supabase projects, but the SQL includes it defensively. |
-| **Polymorphic FK** | `ai_feedback.session_id` is NOT a real FK in PostgreSQL (no `REFERENCES`). It's an application-level convention, disambiguated by `session_type`. |
-| **Seed data** | 8 exercises with deterministic UUIDs (`a1000001-0001-4000-8000-00000000000X`). Both `schema.sql` INSERTs and `backend/seed/exercises.json` contain the same exercises. |
+| File | Purpose |
+|------|---------|
+| `schema.sql` | Extensions, `users`, exercises seed, sessions, games, ai_feedback, base indexes |
+| `migration_v2.sql` | staff, rename users→patients + columns, prescriptions, messages, prescription_id, extra indexes |
+
+Do not duplicate full DDL here; edit the SQL files for structural changes.

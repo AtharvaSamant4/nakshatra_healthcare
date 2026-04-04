@@ -8,7 +8,7 @@ from app.models.game_models import (
 )
 from app.services import gemini_service, feedback_service
 
-VALID_GAME_TYPES = {"memory", "reaction", "pattern"}
+VALID_GAME_TYPES = {"memory", "reaction", "pattern", "stroop", "trail_making"}
 
 
 def create_game_session(payload: GameSessionCreate) -> GameSessionCreateResponse:

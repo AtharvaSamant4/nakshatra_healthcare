@@ -1,11 +1,22 @@
-import logging
+﻿import logging
+import os
 import json
-from google import genai
-from google.genai import types
-from app.config.settings import get_settings
+import time
+
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+_MAX_RETRIES = 3
+_BASE_BACKOFF_SECONDS = 2.0
+
+_GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+]
+
+# Fallbacks for safety.
 _FALLBACK_EXERCISE = {
     "summary": "Great session! Keep up your exercises and stay consistent with your recovery plan.",
     "tips": [
@@ -13,7 +24,7 @@ _FALLBACK_EXERCISE = {
         "Remember to breathe steadily throughout each rep",
         "Rest if you feel any sharp pain",
     ],
-    "encouragement": "You're doing a wonderful job staying committed to your recovery! Keep it up! 💪",
+    "encouragement": "You're doing a wonderful job staying committed to your recovery! Keep it up! ",
     "focus_areas": ["Consistent form", "Full range of motion"],
     "recovery_score": 7,
 }
@@ -25,152 +36,10 @@ _FALLBACK_GAME = {
         "Take a short break if you feel mentally fatigued",
         "Challenge yourself to beat your previous score",
     ],
-    "encouragement": "Every session counts — you're keeping your mind active and sharp! 🧠",
+    "encouragement": "Every session counts — you're keeping your mind active and sharp! ",
     "focus_areas": ["Focus", "Processing speed"],
     "recovery_score": 7,
 }
-
-
-_MODEL = "gemini-2.5-flash"
-
-
-def _get_client() -> genai.Client:
-    settings = get_settings()
-    return genai.Client(api_key=settings.gemini_api_key)
-
-
-def generate_exercise_feedback(session_data: dict, history: list[dict]) -> dict:
-    """
-    Build a prompt from the exercise session + recent history and call Gemini.
-    Returns a structured feedback dict. Falls back to hardcoded response on any error.
-    """
-    try:
-        client = _get_client()
-
-        history_text = ""
-        if history:
-            history_text = "\n".join(
-                f"- {h.get('completed_at', 'unknown date')}: {h.get('reps_completed', 0)} reps, "
-                f"avg angle {h.get('avg_angle', 'N/A')}°, form score {h.get('form_score', 'N/A')}"
-                for h in history[:5]
-            )
-        else:
-            history_text = "No previous sessions recorded."
-
-        prompt = f"""You are a supportive physiotherapy AI assistant helping a patient with their rehabilitation.
-
-Exercise Session Data:
-- Exercise: {session_data.get('exercise_name', 'Unknown')}
-- Body Part: {session_data.get('body_part', 'Unknown')}
-- Reps Completed: {session_data.get('reps_completed', 0)}
-- Average Angle: {session_data.get('avg_angle', 'N/A')}°
-- Min Angle: {session_data.get('min_angle', 'N/A')}°
-- Max Angle: {session_data.get('max_angle', 'N/A')}°
-- Form Score: {session_data.get('form_score', 'N/A')} (0.0–1.0 scale)
-- Duration: {session_data.get('duration_seconds', 0)} seconds
-
-Recent Session History:
-{history_text}
-
-Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
-{{
-  "summary": "2-3 sentence encouraging summary of this session and any progress",
-  "tips": ["tip 1", "tip 2", "tip 3"],
-  "encouragement": "one warm motivational sentence",
-  "focus_areas": ["area 1", "area 2"],
-  "recovery_score": <integer 1-10>
-}}"""
-
-        response = client.models.generate_content(model=_MODEL, contents=prompt)
-        text = response.text.strip()
-
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        parsed = json.loads(text)
-
-        # Validate required keys are present
-        required = {"summary", "tips", "encouragement", "focus_areas", "recovery_score"}
-        if not required.issubset(parsed.keys()):
-            raise ValueError("Gemini response missing required keys")
-
-        # Clamp recovery_score to 1–10
-        parsed["recovery_score"] = max(1, min(10, int(parsed["recovery_score"])))
-
-        return parsed
-
-    except Exception as exc:
-        logger.warning("Gemini exercise feedback failed, using fallback. Error: %s", exc)
-        return _FALLBACK_EXERCISE
-
-
-def generate_game_feedback(session_data: dict, history: list[dict]) -> dict:
-    """
-    Build a prompt from the game session + recent history and call Gemini.
-    Returns a structured feedback dict. Falls back to hardcoded response on any error.
-    """
-    try:
-        client = _get_client()
-
-        history_text = ""
-        if history:
-            history_text = "\n".join(
-                f"- {h.get('completed_at', 'unknown date')}: score {h.get('score', 0)}, "
-                f"accuracy {h.get('accuracy', 'N/A')}"
-                for h in history[:5]
-            )
-        else:
-            history_text = "No previous game sessions recorded."
-
-        prompt = f"""You are a supportive rehabilitation AI assistant helping a patient with cognitive exercises.
-
-Game Session Data:
-- Game Type: {session_data.get('game_type', 'Unknown')}
-- Score: {session_data.get('score', 0)}
-- Accuracy: {session_data.get('accuracy', 'N/A')} (0.0–1.0 scale)
-- Level Reached: {session_data.get('level_reached', 'N/A')}
-- Duration: {session_data.get('duration_seconds', 0)} seconds
-- Extra Details: {json.dumps(session_data.get('game_metadata', {}))}
-
-Recent Game History (same game type):
-{history_text}
-
-Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
-{{
-  "summary": "2-3 sentence encouraging summary of this game session and any progress",
-  "tips": ["tip 1", "tip 2", "tip 3"],
-  "encouragement": "one warm motivational sentence",
-  "focus_areas": ["area 1", "area 2"],
-  "recovery_score": <integer 1-10>
-}}"""
-
-        response = client.models.generate_content(model=_MODEL, contents=prompt)
-        text = response.text.strip()
-
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        parsed = json.loads(text)
-
-        required = {"summary", "tips", "encouragement", "focus_areas", "recovery_score"}
-        if not required.issubset(parsed.keys()):
-            raise ValueError("Gemini response missing required keys")
-
-        parsed["recovery_score"] = max(1, min(10, int(parsed["recovery_score"])))
-
-        return parsed
-
-    except Exception as exc:
-        logger.warning("Gemini game feedback failed, using fallback. Error: %s", exc)
-        return _FALLBACK_GAME
-
 
 _FALLBACK_COGNITIVE = {
     "summary": "Good effort on the cognitive assessment! Regular practice strengthens neural pathways and improves cognitive function.",
@@ -179,77 +48,109 @@ _FALLBACK_COGNITIVE = {
         "Try to minimize distractions during tests",
         "Take breaks between sessions to avoid fatigue",
     ],
-    "encouragement": "Every assessment helps track your cognitive health — keep it up! 🧠",
+    "encouragement": "Every assessment helps track your cognitive health. Keep it up!",
     "focus_areas": ["Processing speed", "Working memory"],
     "recovery_score": 7,
 }
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "429" in msg or "resource_exhausted" in msg or "rate" in msg
+
+from app.config.settings import get_settings
+
+class GroqClient:
+    def __init__(self):
+        settings = get_settings()
+        api_key = getattr(settings, "grok_api_key", "")
+        if not api_key:
+            api_key = os.getenv("GROK_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("GROK_API_KEY is not set in .env")
+
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+        logger.info("[ai] Groq client initialized")
+
+    def generate(self, prompt: str, json_mode: bool = False) -> str:
+        errors = []
+        for model in _GROQ_MODELS:
+            for attempt in range(_MAX_RETRIES + 1):
+                try:
+                    kwargs = {
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": "You are a senior clinical AI specializing in rehabilitation. Return output in the requested format." + (" You must return ONLY raw JSON." if json_mode else "")},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 2000,
+                    }
+                    if json_mode:
+                        kwargs["response_format"] = { "type": "json_object" }
+                    response = self._client.chat.completions.create(**kwargs)
+                    text = (response.choices[0].message.content or "").strip()
+                    if text:
+                        return text
+                    errors.append(f"{model}: empty_response")
+                    break
+                except Exception as exc:
+                    if _is_rate_limit_error(exc) and attempt < _MAX_RETRIES:
+                        wait = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+                        time.sleep(wait)
+                        continue
+                    errors.append(f"{model}: {type(exc).__name__}")
+                    break
+        raise RuntimeError(f"Groq invocation failed: {errors}")
+
+_client_instance = None
+def _get_client():
+    global _client_instance
+    if _client_instance is None:
+        _client_instance = GroqClient()
+    return _client_instance
+
+def _parse_json(text: str, fallback: dict) -> dict:
+    try:
+        if "`json" in text:
+            text = text.split("`json")[1].split("``")[0].strip()
+        elif "``" in text:
+            text = text.split("``")[1].strip()
+        return json.loads(text)
+    except:
+        return fallback
+
+def generate_exercise_feedback(session_data: dict, history: list[dict]) -> dict:
+    prompt = f"Respond with ONLY JSON. Session: {session_data}, History: {history}. Needs keys: summary(str), tips(list), encouragement(str), focus_areas(list), recovery_score(int 1-10)."
+    try:
+        return _parse_json(_get_client().generate(prompt, True), _FALLBACK_EXERCISE)
+    except Exception as e:
+        logger.error(e)
+        return _FALLBACK_EXERCISE
+
+def generate_game_feedback(session_data: dict, history: list[dict]) -> dict:
+    prompt = f"Respond with ONLY JSON. Game: {session_data}, History: {history}. Needs keys: summary(str), tips(list), encouragement(str), focus_areas(list), recovery_score(int 1-10)."
+    try:
+        return _parse_json(_get_client().generate(prompt, True), _FALLBACK_GAME)
+    except Exception as e:
+        logger.error(e)
+        return _FALLBACK_GAME
+
 
 def generate_cognitive_test_feedback(session_data: dict, history: list[dict]) -> dict:
-    """
-    Build a prompt from the cognitive test session + recent history and call Gemini.
-    Returns a structured feedback dict. Falls back to hardcoded response on any error.
-    """
+    prompt = (
+        "Respond with ONLY JSON. Cognitive session: "
+        f"{session_data}, History: {history}. "
+        "Needs keys: summary(str), tips(list), encouragement(str), focus_areas(list), recovery_score(int 1-10)."
+    )
     try:
-        client = _get_client()
-
-        history_text = ""
-        if history:
-            history_text = "\n".join(
-                f"- {h.get('completed_at', 'unknown date')}: score {h.get('score', 0)}, "
-                f"accuracy {h.get('accuracy', 'N/A')}, response_time {h.get('response_time_ms', 'N/A')}ms"
-                for h in history[:5]
-            )
-        else:
-            history_text = "No previous cognitive test sessions recorded."
-
-        prompt = f"""You are a supportive rehabilitation AI assistant helping a patient with cognitive assessment.
-
-Cognitive Test Session Data:
-- Test Type: {session_data.get('test_type', 'Unknown')}
-- Score: {session_data.get('score', 0)} (out of 100)
-- Accuracy: {session_data.get('accuracy', 'N/A')} (0.0–1.0 scale)
-- Response Time: {session_data.get('response_time_ms', 'N/A')} ms
-- Word Count: {session_data.get('word_count', 'N/A')}
-- Error Count: {session_data.get('error_count', 'N/A')}
-- Duration: {session_data.get('duration_seconds', 0)} seconds
-- User Transcript: {session_data.get('transcript', 'N/A')}
-- Expected Response: {session_data.get('expected_response', 'N/A')}
-- Extra Details: {json.dumps(session_data.get('test_metadata', {}))}
-
-Recent Test History (same test type):
-{history_text}
-
-Respond ONLY with a valid JSON object in this exact format (no markdown, no extra text):
-{{
-  "summary": "2-3 sentence encouraging summary of this cognitive test session and any progress",
-  "tips": ["tip 1", "tip 2", "tip 3"],
-  "encouragement": "one warm motivational sentence",
-  "focus_areas": ["area 1", "area 2"],
-  "recovery_score": <integer 1-10>
-}}"""
-
-        response = client.models.generate_content(model=_MODEL, contents=prompt)
-        text = response.text.strip()
-
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        parsed = json.loads(text)
-
-        required = {"summary", "tips", "encouragement", "focus_areas", "recovery_score"}
-        if not required.issubset(parsed.keys()):
-            raise ValueError("Gemini response missing required keys")
-
-        parsed["recovery_score"] = max(1, min(10, int(parsed["recovery_score"])))
-
+        parsed = _parse_json(_get_client().generate(prompt, True), _FALLBACK_COGNITIVE)
+        parsed["recovery_score"] = max(1, min(10, int(parsed.get("recovery_score", 7))))
         return parsed
-
-    except Exception as exc:
-        logger.warning("Gemini cognitive test feedback failed, using fallback. Error: %s", exc)
+    except Exception as e:
+        logger.error(e)
         return _FALLBACK_COGNITIVE
 
 
@@ -259,11 +160,7 @@ def evaluate_cognitive_response(
     expected: str,
     metadata: dict | None = None,
 ) -> dict:
-    """
-    Evaluate a single cognitive test response using Gemini.
-    Returns scoring, corrections, and missed items.
-    """
-    _FALLBACK_EVAL = {
+    fallback = {
         "score": 50,
         "accuracy": 0.5,
         "feedback": "Your response was recorded. Keep practicing for improved results!",
@@ -272,52 +169,62 @@ def evaluate_cognitive_response(
         "extra_items": [],
     }
 
-    try:
-        client = _get_client()
-
-        prompt = f"""You are a cognitive assessment evaluator. Compare the user's spoken response against the expected answer.
+    prompt = f"""Respond with ONLY JSON.
+You are a cognitive assessment evaluator.
 
 Test Type: {test_type}
 Expected Response: {expected}
-User's Transcript: {transcript}
+User Transcript: {transcript}
 Additional Context: {json.dumps(metadata or {})}
 
-Rules for evaluation:
-- For memory_recall: check if words/numbers are recalled correctly and in order. Partial credit for correct items in wrong order.
-- For verbal_fluency: count unique valid words in the category. Ignore duplicates and invalid words.
-- For attention_reaction: check if the answer is correct (exact match or semantically equivalent).
-- For sentence_repetition: compare sentences word by word. Allow minor variations (e.g., "a" vs "the") but penalize missing or wrong words.
+Return keys:
+- score (int 0-100)
+- accuracy (float 0.0-1.0)
+- feedback (string)
+- corrections (list)
+- missed_items (list)
+- extra_items (list)
+"""
 
-Respond ONLY with a valid JSON object (no markdown, no extra text):
-{{
-  "score": <integer 0-100>,
-  "accuracy": <float 0.0-1.0>,
-  "feedback": "one sentence of specific feedback about what the user got right/wrong",
-  "corrections": ["list of corrections if any"],
-  "missed_items": ["items that were expected but missing from the response"],
-  "extra_items": ["items in the response that were not expected or are invalid"]
-}}"""
-
-        response = client.models.generate_content(model=_MODEL, contents=prompt)
-        text = response.text.strip()
-
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        parsed = json.loads(text)
-
-        required = {"score", "accuracy", "feedback", "corrections", "missed_items", "extra_items"}
-        if not required.issubset(parsed.keys()):
-            raise ValueError("Gemini eval response missing required keys")
-
-        parsed["score"] = max(0, min(100, int(parsed["score"])))
-        parsed["accuracy"] = max(0.0, min(1.0, float(parsed["accuracy"])))
-
+    try:
+        parsed = _parse_json(_get_client().generate(prompt, True), fallback)
+        parsed["score"] = max(0, min(100, int(parsed.get("score", 50))))
+        parsed["accuracy"] = max(0.0, min(1.0, float(parsed.get("accuracy", 0.5))))
+        parsed.setdefault("feedback", fallback["feedback"])
+        parsed.setdefault("corrections", [])
+        parsed.setdefault("missed_items", [])
+        parsed.setdefault("extra_items", [])
         return parsed
+    except Exception as e:
+        logger.error(e)
+        return fallback
 
-    except Exception as exc:
-        logger.warning("Gemini cognitive eval failed, using fallback. Error: %s", exc)
-        return _FALLBACK_EVAL
+def generate_report(context: dict) -> dict:
+    prompt = f"Respond with ONLY JSON. Generate a doctor-facing report. Context: {context}. Keys: summary(str), progress_trend(improving, stable, declining), risk_level(low, medium, high), key_issues(list), recommendations(list), next_plan(str)."
+    try:
+        res = _parse_json(_get_client().generate(prompt, True), {})
+        if res.get("progress_trend") not in ("improving", "stable", "declining"): res["progress_trend"] = "stable"
+        return res
+    except:
+        return {"summary": "Error generating report", "progress_trend": "stable"}
+
+def generate_patient_chat(message: str, context: dict) -> str:
+    prompt = f"Context: {context}. The patient asks: {message}. Provide a clinical yet supportive plain text response."
+    try:
+        return _get_client().generate(prompt, False)
+    except:
+        return "I'm currently unable to connect to our clinical AI module. Please call the office if urgent."
+
+def generate_doctor_chat(message: str, context: dict) -> str:
+    prompt = f"Context: {context}. The doctor says: {message}. Draft a clinical response or action text."
+    try:
+        return _get_client().generate(prompt, False)
+    except:
+        return "Module unavailable."
+
+def generate_weekly_report(context: dict) -> dict:
+    return generate_report(context)
+
+def generate_recommendations(context: dict) -> dict:
+    return generate_report(context)
+

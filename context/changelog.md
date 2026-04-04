@@ -31,6 +31,23 @@ None / describe if any.
 
 <!-- Add entries below in reverse chronological order (newest first) -->
 
+### [2026-04-04] — Hospital Rehab V2 documentation refresh
+
+**Author:** Cursor
+**Type:** docs
+**Files changed:**
+- `context/architecture.md`, `context/schema.md`, `context/api_contract.md`, `context/stack.md`, `context/decisions.md`, `context/persona.md`, `context/file_mapping.md`
+- `context/known_integration_gaps.md` (aligned with V2)
+- `ops/claude_code_notes.md`, `ops/feature_pipeline.md`, `ops/hardening_checklist.md`
+
+**What changed:** Rewrote context and ops docs to match the implemented V2 flow (reception / doctor / patient roles, `patients` + `staff` + `prescriptions` + `messages`, migration order, Gemini `gemini-2.5-flash` + `google-genai`, actual `frontend/app` paths and ten API router groups).
+
+**Why:** Prior docs referenced `frontend/src`, six routers only, and user-bootstrap-only flows that no longer describe the primary hospital workflow.
+
+**Breaking changes:** None (documentation only).
+
+---
+
 ### [2026-04-04] — Pre-integration audit (docs only)
 
 **Author:** Cursor / audit
