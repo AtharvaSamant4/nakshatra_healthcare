@@ -15,6 +15,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { exercisesApi, sessionsApi, type Exercise } from "@/lib/api"
 import { useUser } from "@/lib/user-context"
+import type { MovementState } from "@/hooks/use-shoulder-flexion-counter"
 
 export default function ExercisePage() {
   const { selectedUserId } = useUser()
@@ -29,6 +30,10 @@ export default function ExercisePage() {
   const [startedAt, setStartedAt] = useState<string>("")
   const [sessionAccuracy, setSessionAccuracy] = useState(0)
   const [feedbackId, setFeedbackId] = useState<string | undefined>(undefined)
+  const [currentState, setCurrentState] = useState<MovementState>("DOWN")
+  const [currentAngle, setCurrentAngle] = useState(0)
+  const [activeSide, setActiveSide] = useState<"left" | "right">("right")
+  const [calibrated, setCalibrated] = useState(false)
 
   // Load exercises from API
   useEffect(() => {
@@ -40,29 +45,40 @@ export default function ExercisePage() {
       .catch(console.error)
   }, [])
 
-  // Simulate rep counting and form detection while active
+  // Track session duration while active
   useEffect(() => {
     if (!isActive) return
-
-    const repInterval = setInterval(() => {
-      setRepCount((prev) => prev + 1)
-    }, 2500)
-
-    const formInterval = setInterval(() => {
-      const qualities: ("good" | "bad" | "neutral")[] = ["good", "good", "good", "bad"]
-      setFormQuality(qualities[Math.floor(Math.random() * qualities.length)])
-    }, 3000)
 
     const durationInterval = setInterval(() => {
       setDuration((prev) => prev + 1)
     }, 1000)
 
     return () => {
-      clearInterval(repInterval)
-      clearInterval(formInterval)
       clearInterval(durationInterval)
     }
   }, [isActive])
+
+  const handleMetricsChange = useCallback(
+    (metrics: {
+      repCount: number
+      currentAngle: number
+      currentState: MovementState
+      formQuality: "good" | "bad" | "neutral"
+      activeSide: "left" | "right"
+      calibrated: boolean
+      upThreshold: number
+      downThreshold: number
+    }) => {
+      if (!isActive) return
+      setRepCount(metrics.repCount)
+      setCurrentAngle(metrics.currentAngle)
+      setCurrentState(metrics.currentState)
+      setFormQuality(metrics.formQuality)
+      setActiveSide(metrics.activeSide)
+      setCalibrated(metrics.calibrated)
+    },
+    [isActive]
+  )
 
   const handleStart = useCallback(() => {
     setStartedAt(new Date().toISOString())
@@ -106,6 +122,10 @@ export default function ExercisePage() {
     setSessionComplete(false)
     setStartedAt("")
     setFeedbackId(undefined)
+    setCurrentState("DOWN")
+    setCurrentAngle(0)
+    setActiveSide("right")
+    setCalibrated(false)
   }, [])
 
   const handleNewSession = useCallback(() => {
@@ -165,7 +185,11 @@ export default function ExercisePage() {
           <div className="lg:col-span-2">
             <Card className="overflow-hidden">
               <CardContent className="p-0">
-                <WebcamFeed isActive={isActive} className="aspect-video" />
+                <WebcamFeed
+                  isActive={isActive}
+                  className="aspect-video"
+                  onMetricsChange={handleMetricsChange}
+                />
               </CardContent>
             </Card>
 
@@ -178,12 +202,28 @@ export default function ExercisePage() {
                     {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, "0")}
                   </span>
                 </div>
+                <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-sm">
+                  <span className="text-sm text-muted-foreground">Angle:</span>
+                  <span className="font-mono text-lg font-semibold text-foreground">
+                    {Math.round(currentAngle)}deg
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-sm">
+                  <span className="text-sm text-muted-foreground">State:</span>
+                  <span className="font-mono text-lg font-semibold text-foreground">{currentState}</span>
+                </div>
+                <div className="flex items-center gap-2 rounded-lg bg-card px-4 py-2 shadow-sm">
+                  <span className="text-sm text-muted-foreground">Side:</span>
+                  <span className="font-mono text-lg font-semibold text-foreground capitalize">{activeSide}</span>
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-3 w-3">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75"></span>
                     <span className="relative inline-flex h-3 w-3 rounded-full bg-accent"></span>
                   </span>
-                  <span className="text-sm font-medium text-accent">Recording</span>
+                  <span className="text-sm font-medium text-accent">
+                    {calibrated ? "Recording" : "Calibrating"}
+                  </span>
                 </div>
               </div>
             )}

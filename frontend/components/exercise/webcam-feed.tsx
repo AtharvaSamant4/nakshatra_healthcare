@@ -2,34 +2,181 @@
 
 import { useRef, useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+import { useShoulderFlexionCounter, type Landmark, type MovementState } from "@/hooks/use-shoulder-flexion-counter"
 
 interface WebcamFeedProps {
   isActive: boolean
   className?: string
+  onMetricsChange?: (metrics: {
+    repCount: number
+    currentAngle: number
+    currentState: MovementState
+    formQuality: "good" | "bad" | "neutral"
+    activeSide: "left" | "right"
+    calibrated: boolean
+    upThreshold: number
+    downThreshold: number
+  }) => void
 }
 
-export function WebcamFeed({ isActive, className }: WebcamFeedProps) {
+declare global {
+  interface Window {
+    Pose?: new (opts: { locateFile: (file: string) => string }) => {
+      setOptions: (opts: Record<string, unknown>) => void
+      onResults: (cb: (results: { poseLandmarks?: Landmark[] }) => void) => void
+      send: (payload: { image: HTMLVideoElement }) => Promise<void>
+      close?: () => void
+    }
+    Camera?: new (
+      video: HTMLVideoElement,
+      opts: { onFrame: () => Promise<void>; width: number; height: number }
+    ) => { start: () => void; stop?: () => void }
+    drawConnectors?: (
+      ctx: CanvasRenderingContext2D,
+      landmarks: Landmark[],
+      connections: unknown,
+      style: Record<string, unknown>
+    ) => void
+    drawLandmarks?: (
+      ctx: CanvasRenderingContext2D,
+      landmarks: Landmark[],
+      style: Record<string, unknown>
+    ) => void
+    POSE_CONNECTIONS?: unknown
+  }
+}
+
+async function loadScript(src: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`)
+    if (existing) {
+      resolve()
+      return
+    }
+
+    const script = document.createElement("script")
+    script.src = src
+    script.async = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error(`Failed to load ${src}`))
+    document.body.appendChild(script)
+  })
+}
+
+export function WebcamFeed({ isActive, className, onMetricsChange }: WebcamFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { output, processFrame, resetCounter } = useShoulderFlexionCounter()
+
+  useEffect(() => {
+    if (!isActive) {
+      resetCounter()
+    }
+  }, [isActive, resetCounter])
 
   useEffect(() => {
     let stream: MediaStream | null = null
+    let poseInstance: { close?: () => void } | null = null
+    let cameraInstance: { stop?: () => void } | null = null
+    let disposed = false
 
     const startCamera = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: 1280, height: 720 },
         })
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
+        const videoEl = videoRef.current
+        if (videoEl) {
+          videoEl.srcObject = stream
+          await videoEl.play().catch(() => undefined)
           setHasPermission(true)
+
+          await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js")
+          await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js")
+          await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js")
+
+          if (disposed || !window.Pose || !window.Camera) return
+
+          const pose = new window.Pose({
+            locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+          })
+
+          pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          })
+
+          pose.onResults((results: { poseLandmarks?: Landmark[] }) => {
+            const canvas = canvasRef.current
+            const ctx = canvas?.getContext("2d")
+            const activeVideo = videoRef.current
+
+            if (!canvas || !ctx || !activeVideo) return
+
+            canvas.width = activeVideo.videoWidth || 640
+            canvas.height = activeVideo.videoHeight || 480
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+            if (!results.poseLandmarks) return
+
+            const frameOutput = processFrame(results.poseLandmarks)
+
+            if (frameOutput && onMetricsChange) {
+              const formQuality: "good" | "bad" | "neutral" =
+                frameOutput.currentState === "UP" && frameOutput.currentAngle > frameOutput.debug.upThreshold - 5
+                  ? "good"
+                  : frameOutput.currentAngle < frameOutput.debug.downThreshold
+                  ? "neutral"
+                  : "bad"
+
+              onMetricsChange({
+                repCount: frameOutput.repCount,
+                currentAngle: frameOutput.currentAngle,
+                currentState: frameOutput.currentState,
+                formQuality,
+                activeSide: frameOutput.debug.activeSide,
+                calibrated: frameOutput.debug.calibrated,
+                upThreshold: frameOutput.debug.upThreshold,
+                downThreshold: frameOutput.debug.downThreshold,
+              })
+            }
+
+            if (window.drawConnectors && window.POSE_CONNECTIONS) {
+              window.drawConnectors(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, {
+                color: "#00e29f",
+                lineWidth: 3,
+              })
+            }
+            if (window.drawLandmarks) {
+              window.drawLandmarks(ctx, results.poseLandmarks, {
+                color: "#00b7ff",
+                lineWidth: 1,
+                radius: 3,
+              })
+            }
+          })
+
+          const camera = new window.Camera(videoEl, {
+            onFrame: async () => {
+              await pose.send({ image: videoEl })
+            },
+            width: 1280,
+            height: 720,
+          })
+
+          camera.start()
+          poseInstance = pose
+          cameraInstance = camera
         }
       } catch (err) {
         console.error("Error accessing camera:", err)
         setHasPermission(false)
-        setError("Camera access denied. Please enable camera permissions.")
+        setError("Camera or pose model unavailable. Please enable camera permissions and check your network.")
       }
     }
 
@@ -38,90 +185,14 @@ export function WebcamFeed({ isActive, className }: WebcamFeedProps) {
     }
 
     return () => {
+      disposed = true
+      if (cameraInstance?.stop) cameraInstance.stop()
+      if (poseInstance?.close) poseInstance.close()
       if (stream) {
         stream.getTracks().forEach((track) => track.stop())
       }
     }
-  }, [isActive])
-
-  // Simulate pose detection overlay
-  useEffect(() => {
-    if (!isActive || !canvasRef.current || !videoRef.current) return
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    const drawPoseOverlay = () => {
-      if (!videoRef.current || !canvas) return
-      
-      canvas.width = videoRef.current.videoWidth || 640
-      canvas.height = videoRef.current.videoHeight || 480
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      // Simulated pose landmarks (for demo purposes)
-      ctx.strokeStyle = "oklch(0.65 0.18 165)"
-      ctx.lineWidth = 3
-      ctx.lineCap = "round"
-
-      // Draw simulated skeleton lines
-      const centerX = canvas.width / 2
-      const centerY = canvas.height / 2
-
-      // Head
-      ctx.beginPath()
-      ctx.arc(centerX, centerY - 120, 25, 0, Math.PI * 2)
-      ctx.stroke()
-
-      // Shoulders
-      ctx.beginPath()
-      ctx.moveTo(centerX - 80, centerY - 60)
-      ctx.lineTo(centerX + 80, centerY - 60)
-      ctx.stroke()
-
-      // Spine
-      ctx.beginPath()
-      ctx.moveTo(centerX, centerY - 60)
-      ctx.lineTo(centerX, centerY + 60)
-      ctx.stroke()
-
-      // Arms
-      ctx.beginPath()
-      ctx.moveTo(centerX - 80, centerY - 60)
-      ctx.lineTo(centerX - 120, centerY + 20)
-      ctx.lineTo(centerX - 100, centerY + 80)
-      ctx.stroke()
-
-      ctx.beginPath()
-      ctx.moveTo(centerX + 80, centerY - 60)
-      ctx.lineTo(centerX + 120, centerY + 20)
-      ctx.lineTo(centerX + 100, centerY + 80)
-      ctx.stroke()
-
-      // Draw joint points
-      const joints = [
-        [centerX, centerY - 120], // head
-        [centerX - 80, centerY - 60], // left shoulder
-        [centerX + 80, centerY - 60], // right shoulder
-        [centerX - 120, centerY + 20], // left elbow
-        [centerX + 120, centerY + 20], // right elbow
-        [centerX - 100, centerY + 80], // left hand
-        [centerX + 100, centerY + 80], // right hand
-      ]
-
-      joints.forEach(([x, y]) => {
-        ctx.beginPath()
-        ctx.arc(x, y, 8, 0, Math.PI * 2)
-        ctx.fillStyle = "oklch(0.55 0.15 200)"
-        ctx.fill()
-        ctx.stroke()
-      })
-    }
-
-    const interval = setInterval(drawPoseOverlay, 100)
-    return () => clearInterval(interval)
-  }, [isActive])
+  }, [isActive, onMetricsChange, processFrame])
 
   return (
     <div

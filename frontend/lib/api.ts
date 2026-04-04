@@ -1,18 +1,39 @@
 // All backend API calls go through this file.
 // Base URL comes from NEXT_PUBLIC_API_URL env var (default: http://localhost:8000)
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+const BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "")
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown network error"
+    throw new Error(`Network request failed for ${BASE}${path}: ${message}`)
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.detail ?? `Request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
+}
+
+async function requestWithFallback<T>(
+  path: string,
+  fallback: T,
+  context: string,
+  options?: RequestInit
+): Promise<T> {
+  try {
+    return await request<T>(path, options)
+  } catch (error) {
+    console.warn(`${context} unavailable. Using fallback data.`, error)
+    return fallback
+  }
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -212,7 +233,20 @@ export interface ExerciseTrendResponse {
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const usersApi = {
-  list: () => request<UserListItem[]>("/api/users"),
+  list: async () => {
+    try {
+      return await request<UserListItem[]>("/api/users")
+    } catch (error) {
+      console.warn("Users API unavailable. Falling back to demo user.", error)
+      return [
+        {
+          id: "demo-user",
+          name: "Demo User",
+          created_at: new Date().toISOString(),
+        },
+      ]
+    }
+  },
   get: (id: string) => request<User>(`/api/users/${id}`),
   create: (payload: { name: string; email?: string; age?: number; condition_notes?: string }) =>
     request<User>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
@@ -226,7 +260,11 @@ export const exercisesApi = {
     if (params?.body_part) qs.set("body_part", params.body_part)
     if (params?.difficulty) qs.set("difficulty", params.difficulty)
     const query = qs.toString() ? `?${qs}` : ""
-    return request<Exercise[]>(`/api/exercises${query}`)
+    return requestWithFallback<Exercise[]>(
+      `/api/exercises${query}`,
+      [],
+      "Exercises API"
+    )
   },
   get: (id: string) => request<Exercise>(`/api/exercises/${id}`),
 }
@@ -240,8 +278,10 @@ export const sessionsApi = {
       body: JSON.stringify(payload),
     }),
   list: (user_id: string, limit = 20, offset = 0) =>
-    request<SessionListResponse>(
-      `/api/sessions?user_id=${user_id}&limit=${limit}&offset=${offset}`
+    requestWithFallback<SessionListResponse>(
+      `/api/sessions?user_id=${user_id}&limit=${limit}&offset=${offset}`,
+      { sessions: [], total: 0 },
+      "Sessions API"
     ),
 }
 
@@ -257,7 +297,11 @@ export const gameSessionsApi = {
     const qs = new URLSearchParams({ user_id })
     if (game_type) qs.set("game_type", game_type)
     qs.set("limit", String(limit))
-    return request<GameSessionListResponse>(`/api/game-sessions?${qs}`)
+    return requestWithFallback<GameSessionListResponse>(
+      `/api/game-sessions?${qs}`,
+      { sessions: [], total: 0 },
+      "Game sessions API"
+    )
   },
 }
 
@@ -286,12 +330,32 @@ export const feedbackApi = {
 
 export const progressApi = {
   get: (user_id: string) =>
-    request<ProgressResponse>(`/api/progress/${user_id}`),
+    requestWithFallback<ProgressResponse>(
+      `/api/progress/${user_id}`,
+      {
+        user_id,
+        summary: {
+          total_exercise_sessions: 0,
+          total_game_sessions: 0,
+          total_reps: 0,
+          avg_form_score: undefined,
+          current_streak_days: 0,
+          total_active_days: 0,
+        },
+        exercise_progress: [],
+        game_progress: [],
+        recent_feedback: [],
+        body_part_breakdown: [],
+      },
+      "Progress API"
+    ),
   trend: (user_id: string, days = 30, exercise_id?: string) => {
     const qs = new URLSearchParams({ days: String(days) })
     if (exercise_id) qs.set("exercise_id", exercise_id)
-    return request<ExerciseTrendResponse>(
-      `/api/progress/${user_id}/exercise-trend?${qs}`
+    return requestWithFallback<ExerciseTrendResponse>(
+      `/api/progress/${user_id}/exercise-trend?${qs}`,
+      { trend: [] },
+      "Exercise trend API"
     )
   },
 }
