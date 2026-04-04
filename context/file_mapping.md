@@ -54,9 +54,13 @@
 | Feedback loading state | `frontend/src/components/feedback/FeedbackLoader.tsx` |
 | Fetch feedback | `frontend/src/lib/api.ts` → `GET /api/feedback/{session_id}` |
 | Feedback API router | `backend/app/routers/feedback.py` |
-| Feedback service | `backend/app/services/feedback_service.py` |
+| Feedback service (store + get) | `backend/app/services/feedback_service.py` |
 | Gemini API integration | `backend/app/services/gemini_service.py` |
 | Feedback Pydantic models | `backend/app/models/feedback_models.py` |
+
+> **Gemini trigger flow:** `session_service.py` / `game_service.py` call
+> `gemini_service.generate_*_feedback()` → then `feedback_service.store_feedback()`.
+> `feedback.py` router calls `feedback_service.get_feedback()` for reads.
 
 ---
 
@@ -122,3 +126,15 @@
 | Exercise seed data | `backend/seed/exercises.json` |
 | Dependencies | `backend/requirements.txt` |
 | Backend env vars | `backend/.env` |
+| Implementation audit | `backend/BACKEND_AUDIT.md` |
+
+## Backend Models
+
+| Model File | Pydantic Classes |
+|---|---|
+| `backend/app/models/user_models.py` | `UserCreate`, `UserResponse`, `UserListItem` |
+| `backend/app/models/exercise_models.py` | `AngleConfig`, `ExerciseResponse` |
+| `backend/app/models/session_models.py` | `AngleHistoryItem`, `SessionCreate`, `SessionCreateResponse`, `SessionDetail`, `SessionListItem`, `SessionListResponse` |
+| `backend/app/models/game_models.py` | `GameSessionCreate`, `GameSessionCreateResponse`, `GameSessionListItem`, `GameSessionListResponse` |
+| `backend/app/models/feedback_models.py` | `FeedbackResponse`, `FeedbackProcessing` |
+| `backend/app/models/progress_models.py` | `ProgressSummary`, `ExerciseProgressDay`, `GameProgressDay`, `RecentFeedbackItem`, `BodyPartBreakdownItem`, `ProgressResponse`, `ExerciseTrendDay`, `ExerciseTrendResponse` |
