@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from app.models.feedback_models import FeedbackResponse, FeedbackProcessing
@@ -8,7 +9,7 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
 @router.get("/{session_id}")
 def get_feedback(
-    session_id: str,
+    session_id: UUID,
     session_type: str = Query(..., description="'exercise' or 'game'"),
 ):
     """
@@ -16,7 +17,7 @@ def get_feedback(
     Returns 202 with a processing status if feedback hasn't been stored yet.
     """
     try:
-        feedback = feedback_service.get_feedback(session_id, session_type)
+        feedback = feedback_service.get_feedback(str(session_id), session_type)
         return feedback
     except Exception as exc:
         # 404 from get_feedback means feedback not yet available — return 202

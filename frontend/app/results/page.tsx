@@ -15,7 +15,7 @@ import {
   type ProgressResponse,
   type SessionListItem,
 } from "@/lib/api"
-import { useUser } from "@/lib/user-context"
+import { useApp } from "@/lib/app-context"
 import {
   Calendar,
   Dumbbell,
@@ -40,7 +40,8 @@ function average(values: number[]): number | null {
 }
 
 export default function ResultsPage() {
-  const { selectedUserId, loading: userLoading } = useUser()
+  const { selectedUserId } = useApp()
+  const userLoading = false
   const [progress, setProgress] = useState<ProgressResponse | null>(null)
   const [lastSession, setLastSession] = useState<SessionListItem | null>(null)
   const [memorySessions, setMemorySessions] = useState<GameSessionListItem[]>([])

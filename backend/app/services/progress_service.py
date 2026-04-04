@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException
@@ -12,6 +13,8 @@ from app.models.progress_models import (
     ExerciseTrendResponse,
     ExerciseTrendDay,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _date_str(ts: str) -> str:
@@ -37,11 +40,22 @@ def _compute_streak(active_dates: set[str]) -> int:
     return streak
 
 
+def _user_table(supabase) -> str:
+    """Return 'patients' after migration, 'users' before it."""
+    try:
+        supabase.table("patients").select("id").limit(1).execute()
+        return "patients"
+    except Exception:
+        logger.info("patients table not found, falling back to users for progress check")
+        return "users"
+
+
 def get_progress(user_id: str) -> ProgressResponse:
     supabase = get_supabase()
 
-    # --- Verify user exists ---
-    user_check = supabase.table("users").select("id").eq("id", user_id).execute()
+    # --- Verify user/patient exists (safe before and after migration) ---
+    table = _user_table(supabase)
+    user_check = supabase.table(table).select("id").eq("id", user_id).execute()
     if not user_check.data:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -121,7 +135,6 @@ def get_progress(user_id: str) -> ProgressResponse:
     ]
 
     # --- Game progress by day + game_type ---
-    # Key: (date, game_type)
     game_by_day: dict[tuple, dict] = defaultdict(lambda: {"scores": [], "accuracies": []})
     for s in game_sessions:
         if not s.get("completed_at"):

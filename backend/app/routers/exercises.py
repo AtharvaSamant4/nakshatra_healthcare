@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query
+from uuid import UUID
 from typing import Optional
+from fastapi import APIRouter, Query
 from app.models.exercise_models import ExerciseResponse
 from app.services import exercise_service
 
@@ -15,5 +16,5 @@ def list_exercises(
 
 
 @router.get("/{exercise_id}", response_model=ExerciseResponse)
-def get_exercise(exercise_id: str):
-    return exercise_service.get_exercise(exercise_id)
+def get_exercise(exercise_id: UUID):
+    return exercise_service.get_exercise(str(exercise_id))

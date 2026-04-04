@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter
 from app.models.user_models import UserCreate, UserResponse, UserListItem
 from app.services import user_service
@@ -16,5 +17,5 @@ def list_users():
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: str):
-    return user_service.get_user(user_id)
+def get_user(user_id: UUID):
+    return user_service.get_user(str(user_id))

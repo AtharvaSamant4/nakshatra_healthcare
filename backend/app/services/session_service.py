@@ -1,3 +1,4 @@
+import logging
 from fastapi import HTTPException
 from app.db.supabase_client import get_supabase
 from app.models.session_models import (
@@ -8,6 +9,8 @@ from app.models.session_models import (
     SessionListResponse,
 )
 from app.services import gemini_service, feedback_service
+
+logger = logging.getLogger(__name__)
 
 
 def create_session(payload: SessionCreate) -> SessionCreateResponse:
@@ -22,6 +25,27 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
     )
     exercise_name = exercise_row.data[0]["name"] if exercise_row.data else "Unknown"
     body_part = exercise_row.data[0]["body_part"] if exercise_row.data else "Unknown"
+
+    # Fetch patient clinical context for enhanced Gemini prompt (V2).
+    # Safe before migration: patients table may not exist or may lack new columns.
+    patient_context: dict | None = None
+    try:
+        patient_resp = (
+            supabase.table("patients")
+            .select("diagnosis, injury_type, severity")
+            .eq("id", payload.user_id)
+            .execute()
+        )
+        if patient_resp.data:
+            row = patient_resp.data[0]
+            patient_context = {
+                "diagnosis": row.get("diagnosis"),
+                "injury_type": row.get("injury_type"),
+                "severity": row.get("severity"),
+            }
+    except Exception as exc:
+        # patients table or columns not yet available — proceed without context
+        logger.info("patient context unavailable (pre-migration?): %s", exc)
 
     # Build the row to insert — angle_history stored as JSON-serialisable list of dicts
     angle_history_data = None
@@ -41,8 +65,23 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
         "started_at": payload.started_at.isoformat(),
         "completed_at": payload.completed_at.isoformat(),
     }
+    if payload.prescription_id:
+        row["prescription_id"] = payload.prescription_id
 
-    insert_response = supabase.table("exercise_sessions").insert(row).execute()
+    # Insert session — if prescription_id column doesn't exist yet, retry without it
+    try:
+        insert_response = supabase.table("exercise_sessions").insert(row).execute()
+    except Exception as exc:
+        if payload.prescription_id and "prescription_id" in row:
+            logger.warning(
+                "prescription_id column not found, inserting without it: %s", exc
+            )
+            row_without_rx = {k: v for k, v in row.items() if k != "prescription_id"}
+            insert_response = (
+                supabase.table("exercise_sessions").insert(row_without_rx).execute()
+            )
+        else:
+            raise
 
     if not insert_response.data:
         raise HTTPException(status_code=500, detail="Failed to save exercise session")
@@ -73,7 +112,9 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
         "form_score": payload.form_score,
         "duration_seconds": payload.duration_seconds,
     }
-    feedback_data = gemini_service.generate_exercise_feedback(session_data, history)
+    feedback_data = gemini_service.generate_exercise_feedback(
+        session_data, history, patient_context=patient_context
+    )
 
     # Store feedback and get its id
     feedback_id = feedback_service.store_feedback(

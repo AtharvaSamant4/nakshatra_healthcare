@@ -1,28 +1,19 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import { UserProvider } from '@/lib/user-context'
+import { AppProvider } from '@/lib/app-context'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'RehabAI - Your Recovery Companion',
-  description: 'AI-powered rehabilitation system for personalized recovery exercises and progress tracking',
+  title: 'RehabAI — Hospital Rehabilitation System',
+  description: 'AI-powered hospital rehabilitation system for doctors, patients, and receptionists',
   icons: {
     icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
+      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
     ],
     apple: '/apple-icon.png',
   },
@@ -30,15 +21,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <body className="font-sans antialiased" suppressHydrationWarning>
-        <UserProvider>
+        <AppProvider>
           {children}
-        </UserProvider>
+        </AppProvider>
       </body>
     </html>
   )

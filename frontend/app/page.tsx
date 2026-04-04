@@ -1,100 +1,182 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AppLayout } from "@/components/app-layout"
-import { StatsCard } from "@/components/dashboard/stats-card"
-import { ProgressChart } from "@/components/dashboard/progress-chart"
-import { RecentSessions } from "@/components/dashboard/recent-sessions"
-import { AIInsights } from "@/components/dashboard/ai-insights"
-import { useUser } from "@/lib/user-context"
-import { progressApi, sessionsApi, type ProgressResponse, type SessionListItem } from "@/lib/api"
-import { Calendar, Dumbbell, Flame, Target } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useApp } from "@/lib/app-context"
+import { staffApi, patientsApi, type StaffListItem, type PatientListItem } from "@/lib/api"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Dumbbell, Stethoscope, ClipboardList, Building2 } from "lucide-react"
 
-export default function DashboardPage() {
-  const { selectedUserId, selectedUser, loading: userLoading } = useUser()
-  const [progress, setProgress] = useState<ProgressResponse | null>(null)
-  const [recentSessions, setRecentSessions] = useState<SessionListItem[]>([])
-  const [dataLoading, setDataLoading] = useState(false)
+type RoleKey = "patient" | "doctor" | "receptionist"
+
+export default function RoleSelectorPage() {
+  const { setSession } = useApp()
+  const router = useRouter()
+
+  const [selectedRole, setSelectedRole] = useState<RoleKey | null>(null)
+  const [staff, setStaff] = useState<StaffListItem[]>([])
+  const [patients, setPatients] = useState<PatientListItem[]>([])
+  const [selectedId, setSelectedId] = useState<string>("")
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!selectedUserId) return
-    setDataLoading(true)
+    setLoading(true)
     Promise.all([
-      progressApi.get(selectedUserId),
-      sessionsApi.list(selectedUserId, 5),
+      staffApi.list().catch(() => [] as StaffListItem[]),
+      patientsApi.list().catch(() => [] as PatientListItem[]),
     ])
-      .then(([prog, sessions]) => {
-        setProgress(prog)
-        setRecentSessions(sessions.sessions)
+      .then(([s, p]) => {
+        setStaff(s)
+        setPatients(p)
       })
-      .catch(console.error)
-      .finally(() => setDataLoading(false))
-  }, [selectedUserId])
+      .finally(() => setLoading(false))
+  }, [])
 
-  const isLoading = userLoading || dataLoading
+  const doctors = staff.filter((s) => s.role === "doctor")
+  const receptionists = staff.filter((s) => s.role === "receptionist")
+
+  function handleRoleCard(role: RoleKey) {
+    setSelectedRole(role)
+    setSelectedId("")
+  }
+
+  function handleEnter() {
+    if (!selectedRole || !selectedId) return
+
+    if (selectedRole === "patient") {
+      const p = patients.find((x) => x.id === selectedId)
+      if (!p) return
+      setSession("patient", { id: p.id, name: p.name, status: p.status, doctor_id: p.doctor_id })
+      router.push("/patient")
+    } else if (selectedRole === "doctor") {
+      const d = doctors.find((x) => x.id === selectedId)
+      if (!d) return
+      setSession("doctor", { id: d.id, name: d.name, role: "doctor", specialization: d.specialization })
+      router.push("/doctor")
+    } else {
+      const r = receptionists.find((x) => x.id === selectedId)
+      if (!r) return
+      setSession("receptionist", { id: r.id, name: r.name, role: "receptionist" })
+      router.push("/reception")
+    }
+  }
+
+  const identityOptions: { id: string; label: string }[] =
+    selectedRole === "patient"
+      ? patients.map((p) => ({ id: p.id, label: `${p.name}${p.status ? ` — ${p.status}` : ""}` }))
+      : selectedRole === "doctor"
+      ? doctors.map((d) => ({ id: d.id, label: `${d.name}${d.specialization ? ` (${d.specialization})` : ""}` }))
+      : receptionists.map((r) => ({ id: r.id, label: r.name }))
+
+  const roles: { key: RoleKey; label: string; description: string; icon: React.ElementType; color: string }[] = [
+    {
+      key: "receptionist",
+      label: "Receptionist",
+      description: "Register patients and assign them to doctors",
+      icon: ClipboardList,
+      color: "text-amber-600",
+    },
+    {
+      key: "doctor",
+      label: "Doctor",
+      description: "Manage patients, prescribe exercises, and monitor progress",
+      icon: Stethoscope,
+      color: "text-primary",
+    },
+    {
+      key: "patient",
+      label: "Patient",
+      description: "View your prescribed exercises, play games, and message your doctor",
+      icon: Dumbbell,
+      color: "text-accent",
+    },
+  ]
 
   return (
-    <AppLayout>
-      <div className="space-y-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
+      <div className="mb-8 flex items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary">
+          <Building2 className="h-6 w-6 text-primary-foreground" />
+        </div>
         <div>
-          <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
-            Welcome back, {selectedUser?.name ?? "…"}
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Track your progress and continue your rehabilitation journey
-          </p>
+          <h1 className="text-3xl font-bold text-foreground">RehabAI</h1>
+          <p className="text-sm text-muted-foreground">Hospital Rehabilitation System</p>
         </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard
-            title="Total Sessions"
-            value={isLoading ? "—" : String(progress?.summary.total_exercise_sessions ?? 0)}
-            description="Exercise sessions"
-            icon={Calendar}
-          />
-          <StatsCard
-            title="Total Reps"
-            value={isLoading ? "—" : (progress?.summary.total_reps ?? 0).toLocaleString()}
-            description="All time"
-            icon={Dumbbell}
-          />
-          <StatsCard
-            title="Day Streak"
-            value={isLoading ? "—" : String(progress?.summary.current_streak_days ?? 0)}
-            description="Keep it going!"
-            icon={Flame}
-          />
-          <StatsCard
-            title="Avg Form Score"
-            value={
-              isLoading
-                ? "—"
-                : progress?.summary.avg_form_score != null
-                ? `${Math.round(progress.summary.avg_form_score * 100)}%`
-                : "N/A"
-            }
-            description="Last sessions"
-            icon={Target}
-          />
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <ProgressChart
-              data={progress?.exercise_progress ?? []}
-              loading={isLoading}
-            />
-          </div>
-          <div>
-            <AIInsights
-              feedback={progress?.recent_feedback ?? []}
-              loading={isLoading}
-            />
-          </div>
-        </div>
-
-        <RecentSessions sessions={recentSessions} loading={isLoading} />
       </div>
-    </AppLayout>
+
+      <p className="mb-8 text-center text-muted-foreground">
+        Select your role to continue
+      </p>
+
+      <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-3">
+        {roles.map(({ key, label, description, icon: Icon, color }) => (
+          <Card
+            key={key}
+            onClick={() => handleRoleCard(key)}
+            className={`cursor-pointer transition-all hover:shadow-md ${
+              selectedRole === key
+                ? "ring-2 ring-primary shadow-md"
+                : "hover:border-primary/40"
+            }`}
+          >
+            <CardHeader className="pb-2">
+              <div className={`mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-muted`}>
+                <Icon className={`h-5 w-5 ${color}`} />
+              </div>
+              <CardTitle className="text-base">{label}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">{description}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {selectedRole && (
+        <div className="mt-8 w-full max-w-sm space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
+              Who are you?
+            </label>
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : identityOptions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No {selectedRole}s found. Add some via the backend first.
+              </p>
+            ) : (
+              <Select value={selectedId} onValueChange={setSelectedId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={`Select ${selectedRole}…`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {identityOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <Button
+            className="w-full"
+            disabled={!selectedId}
+            onClick={handleEnter}
+          >
+            Enter as {selectedRole}
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }

@@ -39,9 +39,14 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=settings.gemini_api_key)
 
 
-def generate_exercise_feedback(session_data: dict, history: list[dict]) -> dict:
+def generate_exercise_feedback(
+    session_data: dict,
+    history: list[dict],
+    patient_context: dict | None = None,
+) -> dict:
     """
     Build a prompt from the exercise session + recent history and call Gemini.
+    Optionally enriches the prompt with patient clinical context (diagnosis, injury_type, severity).
     Returns a structured feedback dict. Falls back to hardcoded response on any error.
     """
     try:
@@ -57,8 +62,21 @@ def generate_exercise_feedback(session_data: dict, history: list[dict]) -> dict:
         else:
             history_text = "No previous sessions recorded."
 
-        prompt = f"""You are a supportive physiotherapy AI assistant helping a patient with their rehabilitation.
+        # Build clinical context block if patient data is available
+        clinical_section = ""
+        if patient_context:
+            diagnosis = patient_context.get("diagnosis") or "Not specified"
+            injury_type = patient_context.get("injury_type") or "Not specified"
+            severity = patient_context.get("severity") or "Not specified"
+            clinical_section = f"""
+Patient Clinical Context:
+- Diagnosis: {diagnosis}
+- Injury Type: {injury_type}
+- Severity: {severity}
+"""
 
+        prompt = f"""You are a supportive physiotherapy AI assistant helping a hospital patient with their rehabilitation.
+{clinical_section}
 Exercise Session Data:
 - Exercise: {session_data.get('exercise_name', 'Unknown')}
 - Body Part: {session_data.get('body_part', 'Unknown')}
