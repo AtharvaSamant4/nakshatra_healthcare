@@ -1,18 +1,18 @@
-# Known Integration Gaps (living document)
+# Known integration gaps (V2)
 
-> Populated by the **2026-04-04 pre-integration audit**. Tracks mismatches between contract, docs, and the current repo **without** prescribing code fixes here.
+> Mismatches and rough edges observed between **implemented** frontend, backend, and docs. Not a backlog ticket list.
 
 | Area | Issue |
-|---|---|
-| **Users** | No UI uses `POST /api/users`. Fresh Supabase ⇒ empty `users` ⇒ `selectedUserId` null ⇒ dashboard/exercise/games skip API writes. |
-| **Feedback poll** | `feedbackApi.get` + `GET /api/feedback/{session_id}` are implemented but not used after session create; `feedback_id` on `POST` responses is mostly unused. |
-| **Async narrative** | Docs describe async Gemini + poll; `session_service` / `game_service` **await** Gemini and insert feedback **before** returning `201` (synchronous path). |
-| **Feedback 404 → 202** | Router maps any `get_feedback` 404 to `202 processing`, including wrong `session_type` or invalid id — not distinguishable from “still generating”. |
-| **Exercise seed URLs** | `schema.sql` uses `thumbnail_url` under `/images/exercises/...`; `backend/seed/exercises.json` uses `/images/....png` (no `exercises/` segment). Align before relying on JSON import. |
-| **Pattern game** | API allows `game_type: "pattern"`; frontend games page has Memory + Reaction only. |
-| **GET session by id** | Backend implements `GET /api/sessions/{session_id}`; `frontend/lib/api.ts` has no `sessionsApi.get` wrapper. |
-| **Progress trend** | Backend implements `GET /api/progress/{user_id}/exercise-trend`; charts use `exercise_progress` from main progress payload, not `progressApi.trend`. |
-| **Validation errors** | FastAPI `422` responses use `detail` as a list of objects; locked contract error example shows `detail` as a string + `status_code`. |
-| **Results “Avg Accuracy”** | `frontend/app/results/page.tsx` labels a card “Avg Accuracy” but binds `progress.summary.avg_form_score` (exercise form, not game accuracy). |
-| **Memory game → API** | `POST` omits `accuracy` / `level_reached`; contract allows null — OK. Game stats UI computes averages from `accuracy` which may be null for all rows. |
-| **CORS** | `allow_origins` is only `http://localhost:3000`; other origins fail until extended. |
+|------|--------|
+| **Feedback poll** | `feedbackApi.get` exists; many flows rely on **201 + `feedback_id`** and aggregated **`GET /api/progress`** instead of polling `GET /api/feedback` after each session. |
+| **404 vs 202 on feedback** | Router may map missing feedback to **202**; not always distinguishable from wrong `session_type` / bad id. |
+| **Gemini timing** | Session/game services typically **await** Gemini (or fallback) before returning **201**; narrative “fire-and-forget + poll only” is inaccurate. |
+| **Doctor patient list** | UI calls **`GET /api/patients`** without `doctor_id`, filters in browser, **falls back to full list** if filter yields empty — demo-stable, not strict RBAC. |
+| **GET session by id** | Backend: `GET /api/sessions/{session_id}`; **`frontend/lib/api.ts`** has no `sessionsApi.get` wrapper. |
+| **Progress trend** | `GET /api/progress/{id}/exercise-trend` implemented; charts may use only the main progress payload. |
+| **422 shape** | FastAPI validation errors often use **`detail`** as a **list**; some docs show string-only errors. |
+| **Pattern game** | API allows `game_type: "pattern"`; games UI may expose only memory/reaction. |
+| **Exercise seed URLs** | `schema.sql` thumbnail paths may differ from `backend/seed/exercises.json` — align if importing JSON. |
+| **CORS** | `allow_origins` is **`http://localhost:3000`** only. |
+| **UUID paths** | Invalid UUID strings in path params can produce **500** from downstream errors — validate before linking to `/doctor/[patientId]`. |
+| **Legacy `/api/users`** | Still mounted; table is **`patients`** after migration — prefer **`/api/patients`** for hospital flows. |

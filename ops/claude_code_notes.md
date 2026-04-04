@@ -1,123 +1,79 @@
 # Claude Code / Cursor AI — Operating Rules
 
-> Read this BEFORE writing any code. These rules are non-negotiable.
+> Read before changing code. **Do not trust stale chat or old copies of context** — reconcile with `backend/`, `frontend/`, `schema.sql`, and `migration_v2.sql` on disk.
 
 ---
 
-## Mandatory Pre-Read
+## Mandatory pre-read (ordered)
 
-Before implementing any feature, read these context files **in order**:
-
-1. `context/architecture.md` — understand the system
-2. `context/api_contract.md` — know the exact API shapes
-3. `context/schema.md` — know the database tables and relationships
-4. `schema.sql` (repo root) — canonical DDL + seed data (run this in Supabase)
-5. `context/file_mapping.md` — know where to write code
-6. `context/decisions.md` — understand why things are the way they are
-
-**Also read before touching any existing backend file:**
-
-6. `backend/BACKEND_AUDIT.md` — full record of what has been implemented, how each file works, and notable decisions made during implementation. Read this to avoid re-implementing or conflicting with existing logic.
+1. `context/architecture.md` — V2 workflow and data flow
+2. `context/api_contract.md` — request/response shapes (must match running routers)
+3. `context/schema.md` + **`schema.sql`** + **`migration_v2.sql`** — table names and FKs after migration
+4. `context/file_mapping.md` — where UI and routers live
+5. `context/decisions.md` — no auth, filtering, migration guards
+6. `backend/BACKEND_AUDIT.md` — implementation detail where it exists
 
 ---
 
-## Hard Rules
+## Hard rules
 
-### 1. Never Break the API Contract
+### 1. Contract matches code
 
-- The API contract in `context/api_contract.md` is **LOCKED**
-- Request and response shapes must match **exactly**
-- Field names, types, and nesting must be identical
-- If you think the contract needs changing, **stop and ask** — do not modify it unilaterally
-- Both frontend and backend must implement to the same contract
+- **`context/api_contract.md` documents the live API** — if you change an endpoint, update the contract in the same change set.
+- Field names and JSON nesting must match Pydantic models and `frontend/lib/api.ts`.
 
-### 2. Respect the File Structure
+### 2. Paths and structure
 
-- Check `context/file_mapping.md` before creating any new file
-- Files go in their designated locations — no ad-hoc directories
-- Components belong in `frontend/src/components/{category}/`
-- Services belong in `backend/app/services/`
-- Routers belong in `backend/app/routers/`
-- Never put business logic in routers — routers call services
+- Next.js routes live under **`frontend/app/`** (not `frontend/src/app`).
+- Routers: `backend/app/routers/`; services: `backend/app/services/`; routers delegate to services.
+- Prefer extending `frontend/lib/api.ts` instead of ad-hoc `fetch` in components.
 
-### 3. Frontend Rules
+### 3. Migration safety
 
-- MediaPipe and exercise logic are **client-side only** — never move to backend
-- Use `"use client"` for components that use browser APIs (webcam, MediaPipe)
-- State management: `useState`, `useRef`, `useContext` only — no Redux, no Zustand
-- API calls go through `lib/api.ts` — never call `fetch` directly from components
-- Pose landmarks use `useRef` (too fast for React re-renders)
+- New environments: run **`schema.sql`**, then **`migration_v2.sql`** in Supabase (order matters).
+- Backend services may return **503** or omit optional fields when V2 tables/columns are missing — do not assume “table always exists” without checking code.
+- Session create may retry without `prescription_id` if the column is absent — keep optional fields backward compatible.
 
-### 4. Backend Rules
+### 4. Frontend–backend sync
 
-- Every router function must call a corresponding service function
-- Pydantic models define all request/response shapes — no raw dicts
-- All Supabase calls go through `db/supabase_client.py`
-- Gemini calls go through `services/gemini_service.py` with try/except and fallback
-- Return hardcoded fallback feedback if Gemini fails — never let the demo break
-- Settings loaded via `get_settings()` from `app/config/settings.py` — never use `os.getenv` directly
-- Exercise models live in `backend/app/models/exercise_models.py` (not in `session_models.py`)
-- Gemini SDK is `google-genai` (`from google import genai`) — do NOT use `google-generativeai` (deprecated)
-- Gemini model is `gemini-2.5-flash` — stored as `_MODEL` constant in `gemini_service.py`
-- `feedback_service.get_feedback()` requires both `session_id` and `session_type` — always pass both
+- Add router in `main.py` when adding a new `APIRouter`.
+- Mirror paths and payloads in `frontend/lib/api.ts` and TypeScript types.
+- UUIDs in **URL segments** must be valid UUID strings; invalid values can surface as **500** from the DB layer — validate or guard on the client before navigation.
 
-### 5. Data Rules
+### 5. Gemini
 
-- All IDs are UUID v4
-- Timestamps are `timestamptz` (ISO 8601 with timezone)
-- Float columns are `double precision` in PostgreSQL, `float` in Python/Pydantic, JSON numbers in API
-- `form_score` is always 0.0 – 1.0
-- `recovery_score` is always 1 – 10
-- `game_type` is always one of: `"memory"`, `"reaction"`, `"pattern"`
-- `session_type` is always one of: `"exercise"`, `"game"`
-- All FK references use `ON DELETE CASCADE` — see `schema.sql`
+- Package: **`google-genai`** (`from google import genai`).
+- Model: **`gemini-2.5-flash`** (`gemini_service.py` `_MODEL`).
+- `feedback_service.get_feedback(session_id, session_type)` — always pass **both** arguments.
+
+### 6. Auth
+
+- **No authentication** in V2 demo: role + entity chosen on `/` and stored in **`sessionStorage`** (`AppProvider`). Do not add middleware that contradicts this without an explicit product decision.
 
 ---
 
-## Common Mistakes to Avoid
+## Common mistakes
 
-| Mistake | Correct Approach |
-|---|---|
-| Adding auth middleware | No auth in V1 — user ID comes from request body/params |
-| Creating a new state management library | Use React built-ins: `useState`, `useRef`, `useContext` |
-| Sending landmarks to the backend | Only send **session summaries** (reps, angles, score) |
-| Blocking POST response for Gemini | Return `feedback_id` immediately, let frontend poll |
-| Using raw SQL | Use Supabase client methods |
-| Adding new API endpoints not in contract | Ask first — contract is frozen |
-| Hardcoding user IDs | Get from `UserContext` (frontend) or request params (backend) |
-| Skipping error handling on Gemini | Always wrap in try/except with fallback response |
-| Using `os.getenv` directly | Import `get_settings()` from `app/config/settings.py` |
-| Adding SQL GROUP BY for aggregation | Python-side aggregation is correct for V1 scale (see decision 12) |
-| Importing Supabase client directly | Always call `get_supabase()` from `db/supabase_client.py` |
-| Using `google-generativeai` or `import google.generativeai` | Use `google-genai`: `from google import genai` (see decision 13) |
-| Using model name `gemini-pro` | Use `_MODEL = "gemini-2.5-flash"` in `gemini_service.py` |
-| Calling `feedback_service.get_feedback(session_id)` with one arg | Signature is `get_feedback(session_id, session_type)` — always pass both |
+| Mistake | Correct approach |
+|--------|-------------------|
+| Trusting an old `context/*.md` from another branch | Re-read repo files; treat code + `schema.sql` as source of truth |
+| Assuming async-only feedback | Session/game **POST** paths typically **await** Gemini (or fallback) before **201**; `GET /api/feedback` still supports **202** |
+| `frontend/src/...` paths | Use **`frontend/app`**, **`frontend/lib`**, **`frontend/components`** |
+| Calling `get_feedback` with one argument | Pass `(session_id, session_type)` |
+| Skipping migration | Apply `migration_v2.sql` after `schema.sql` for `patients`, `staff`, etc. |
 
 ---
 
-## When You're Unsure
+## Quality
 
-1. Re-read the relevant context file
-2. Check `context/decisions.md` for rationale
-3. Check `context/api_contract.md` for exact shapes
-4. If still unsure, **ask** rather than assume
-
----
-
-## Code Quality Expectations
-
-- TypeScript: strict types, no `any` unless absolutely necessary
-- Python: type hints on all function signatures
-- Descriptive variable names (not `x`, `data`, `result`)
-- Comments only where the **why** isn't obvious — don't comment the what
-- Error messages should be user-friendly (shown on screen), not developer jargon
+- TypeScript: avoid unnecessary `any`.
+- Python: type hints on public functions.
+- Comments for **why**, not what.
 
 ---
 
-## Testing Approach (V1)
+## Testing (hackathon mode)
 
-- No unit tests (hackathon mode)
-- Test manually by running the full flow
-- Backend: use Swagger UI at `http://localhost:8000/docs`
-- Frontend: click through every page + exercise + game
-- Verify API calls in browser Network tab
+- Backend: `http://localhost:8000/docs`
+- Frontend: click through **/** → role → `/reception` | `/doctor` | `/patient/*` plus legacy `/exercise`, `/games`, `/results` as needed
+- Network tab + Supabase rows for writes
