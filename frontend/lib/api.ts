@@ -252,7 +252,7 @@ export interface SessionListResponse {
 
 export interface CreateGameSessionPayload {
   user_id: string
-  game_type: "memory" | "reaction" | "pattern"
+  game_type: "memory" | "reaction" | "pattern" | "stroop" | "trail_making"
   score: number
   accuracy?: number
   avg_reaction_ms?: number
@@ -501,6 +501,12 @@ export const progressApi = {
       "Exercise trend API"
     )
   },
+  improvement: (user_id: string) =>
+    requestWithFallback<{ improvement: number | null }>(
+      `/api/progress/${user_id}/improvement`,
+      { improvement: null },
+      "Improvement API"
+    ),
 }
 
 // ─── Cognitive Tests ──────────────────────────────────────────────────────────
@@ -599,5 +605,320 @@ export const cognitiveTestsApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+}
+
+// ─── V2 Hospital Workflow Types ───────────────────────────────────────────────
+
+export interface AIChatMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
+export interface StaffListItem {
+  id: string
+  name: string
+  role: string
+  specialization?: string
+}
+
+export interface PatientCreateResponse {
+  id: string
+  name: string
+  status?: string
+  doctor_id?: string
+  created_at: string
+}
+
+export interface PatientListItem {
+  id: string
+  name: string
+  status?: string
+  doctor_id?: string
+  injury_type?: string
+  severity?: string
+  has_alert?: boolean
+}
+
+export interface Patient {
+  id: string
+  name: string
+  age?: number
+  phone?: string
+  email?: string
+  doctor_id?: string
+  status?: string
+  diagnosis?: string
+  injury_type?: string
+  severity?: string
+  emergency?: boolean
+  condition_notes?: string
+  specialization?: string  // present on staff union
+  created_at: string
+}
+
+export interface Prescription {
+  id: string
+  patient_id: string
+  doctor_id: string
+  exercise_id?: string
+  exercise_name?: string
+  game_type?: string
+  target_reps?: number
+  target_sets?: number
+  frequency?: string
+  priority?: string
+  notes?: string
+  status?: string
+  created_at: string
+  compliance?: {
+    sessions_completed: number
+    last_session_at?: string
+  }
+}
+
+export interface Message {
+  id: string
+  patient_id: string
+  sender_type: "patient" | "doctor"
+  sender_name?: string
+  content: string
+  created_at: string
+}
+
+// Backend returns { id, patient_id, report: dict, created_at }
+export interface PatientReport {
+  id?: string
+  patient_id: string
+  report: ReportJson
+  created_at?: string
+}
+
+export interface ReportJson {
+  summary?: string
+  progress_trend?: "improving" | "stable" | "declining"
+  risk_level?: "low" | "medium" | "high"
+  key_issues?: string[]
+  recommendations?: string[]
+  next_plan?: string
+  // weekly report extra fields
+  improvement?: number
+  consistency?: number
+  form_analysis?: string
+  cognitive_analysis?: string
+  doctor_attention?: boolean
+}
+
+// Backend returns { id, patient_id, recommendation: dict, created_at }
+export interface RecommendationResponse {
+  id?: string
+  patient_id: string
+  recommendation: RecommendationJson
+  created_at?: string
+}
+
+export interface RecommendedExercise {
+  name: string
+  sets: number
+  reps: number
+  reason: string
+}
+
+export interface RecommendationJson {
+  plan?: string
+  adjustments?: string[]
+  focus_areas?: string[]
+  notes?: string
+  intensity?: "increase" | "maintain" | "decrease"
+  composite_score?: number
+  warnings?: string[]
+  recommended_exercises?: (string | RecommendedExercise)[]
+  reasoning?: string
+}
+
+export interface RecoveryPrediction {
+  estimated_days?: number
+  confidence?: string
+  target_rom?: number
+  initial_rom?: number
+  latest_rom?: number
+  progress_rate_per_day?: number
+}
+
+export interface AdaptivePlan {
+  reps: number
+  sets: number
+  intensity: string
+  reason: string
+}
+
+export interface RiskAssessment {
+  risk_level: string
+  reasons: string[]
+}
+
+export interface RecoveryScore {
+  recovery_score: number
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  login: (payload: { email: string; password: string }) =>
+    request<{ token: string; role: string; user: Patient }>(
+      "/auth/login",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+}
+
+// ─── Staff ────────────────────────────────────────────────────────────────────
+
+export const staffApi = {
+  list: (role?: string) => {
+    const qs = role ? `?role=${role}` : ""
+    return requestWithFallback<StaffListItem[]>(`/api/staff${qs}`, [], "Staff API")
+  },
+  get: (id: string) => request<StaffListItem>(`/api/staff/${id}`),
+  create: (payload: { name: string; email?: string; role: string; specialization?: string }) =>
+    request<StaffListItem>("/api/staff", { method: "POST", body: JSON.stringify(payload) }),
+}
+
+// ─── Patients ─────────────────────────────────────────────────────────────────
+
+export const patientsApi = {
+  list: (params?: { doctor_id?: string; status?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.doctor_id) qs.set("doctor_id", params.doctor_id)
+    if (params?.status) qs.set("status", params.status)
+    const query = qs.toString() ? `?${qs}` : ""
+    return requestWithFallback<PatientListItem[]>(`/api/patients${query}`, [], "Patients API")
+  },
+  get: (id: string) => request<Patient>(`/api/patients/${id}`),
+  create: (payload: {
+    name: string
+    age?: number
+    phone?: string
+    email?: string
+    doctor_id?: string
+    emergency?: boolean
+    condition_notes?: string
+  }) => request<PatientCreateResponse>("/api/patients", { method: "POST", body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Patient>) =>
+    request<Patient>(`/api/patients/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+}
+
+// ─── Prescriptions ────────────────────────────────────────────────────────────
+
+export const prescriptionsApi = {
+  list: (patient_id: string) =>
+    requestWithFallback<Prescription[]>(
+      `/api/prescriptions?patient_id=${patient_id}`,
+      [],
+      "Prescriptions API"
+    ),
+  create: (payload: {
+    patient_id: string
+    doctor_id: string
+    exercise_id?: string
+    game_type?: string
+    target_reps?: number
+    target_sets?: number
+    frequency?: string
+    priority?: string
+    notes?: string
+  }) => request<Prescription>("/api/prescriptions", { method: "POST", body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Prescription>) =>
+    request<Prescription>(`/api/prescriptions/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+}
+
+// ─── Messages ─────────────────────────────────────────────────────────────────
+
+export const messagesApi = {
+  // getThread is the canonical name used by message pages
+  getThread: (patient_id: string, limit = 50) =>
+    requestWithFallback<{ messages: Message[] }>(
+      `/api/messages?patient_id=${patient_id}&limit=${limit}`,
+      { messages: [] },
+      "Messages API"
+    ),
+  list: (patient_id: string, limit = 50) =>
+    requestWithFallback<{ messages: Message[] }>(
+      `/api/messages?patient_id=${patient_id}&limit=${limit}`,
+      { messages: [] },
+      "Messages API"
+    ),
+  send: (payload: {
+    patient_id: string
+    sender_type: "patient" | "doctor"
+    sender_id: string
+    content: string
+  }) => request<Message>("/api/messages", { method: "POST", body: JSON.stringify(payload) }),
+}
+
+// ─── AI ───────────────────────────────────────────────────────────────────────
+
+export const aiApi = {
+  patientChat: (patient_id: string, message: string) =>
+    request<{ response: string }>("/api/ai/patient-chat", {
+      method: "POST",
+      body: JSON.stringify({ patient_id, message }),
+    }),
+  doctorChat: (doctor_id: string, patient_id: string, message: string) =>
+    request<{ response: string }>("/api/ai/doctor-chat", {
+      method: "POST",
+      body: JSON.stringify({ doctor_id, patient_id, message }),
+    }),
+  generateReport: (patient_id: string) =>
+    request<PatientReport>("/api/ai/generate-report", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+  listReports: (patient_id: string) =>
+    requestWithFallback<PatientReport[]>(
+      `/api/ai/reports/${patient_id}`,
+      [],
+      "AI reports API"
+    ),
+  // listRecommendations matches the method name used by patient/page.tsx
+  listRecommendations: (patient_id: string) =>
+    requestWithFallback<RecommendationResponse[]>(
+      `/api/ai/recommendations/${patient_id}`,
+      [],
+      "AI recommendations API"
+    ),
+  // recommendPlan matches the method name used by patient/page.tsx and ai-recommendation.tsx
+  recommendPlan: (patient_id: string) =>
+    request<RecommendationResponse>("/api/ai/recommend-plan", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+  // recoveryPrediction matches the method name used by patient/page.tsx
+  recoveryPrediction: (patient_id: string) =>
+    requestWithFallback<RecoveryPrediction>(
+      "/api/ai/recovery-prediction",
+      {},
+      "Recovery prediction API",
+      { method: "POST", body: JSON.stringify({ patient_id }) }
+    ),
+  adaptivePlan: (patient_id: string) =>
+    requestWithFallback<AdaptivePlan>(
+      "/api/ai/adaptive-plan",
+      { reps: 10, sets: 3, intensity: "maintain", reason: "" },
+      "Adaptive plan API",
+      { method: "POST", body: JSON.stringify({ patient_id }) }
+    ),
+  calculateRisk: (patient_id: string) =>
+    requestWithFallback<RiskAssessment>(
+      "/api/ai/calculate-risk",
+      { risk_level: "low", reasons: [] },
+      "Risk assessment API",
+      { method: "POST", body: JSON.stringify({ patient_id }) }
+    ),
+  recoveryScore: (patient_id: string) =>
+    requestWithFallback<RecoveryScore>(
+      "/api/ai/recovery-score",
+      { recovery_score: 0 },
+      "Recovery score API",
+      { method: "POST", body: JSON.stringify({ patient_id }) }
+    ),
 }
 

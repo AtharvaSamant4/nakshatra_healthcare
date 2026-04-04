@@ -75,10 +75,10 @@ export default function PatientDashboard() {
           }
         }
 
-        if (recovery) setRecoveryDays({ estimated_days: recovery.estimated_days, confidence: recovery.confidence })
-        if (adaptive) setAdaptivePlan(adaptive)
-        if (risk) setRiskAssessment(risk)
-        if (recScore) setRecoveryScore(recScore.recovery_score)
+        if (recovery) setRecoveryDays({ estimated_days: recovery.estimated_days ?? null, confidence: recovery.confidence ?? "" })
+        if (adaptive) setAdaptivePlan(adaptive as { reps: number; sets: number; intensity: string; reason: string })
+        if (risk) setRiskAssessment(risk as { risk_level: string; reasons: string[] })
+        if (recScore) setRecoveryScore(recScore.recovery_score ?? null)
         if (impData) setImprovement(impData.improvement)
       })
       .catch(console.error)
@@ -247,7 +247,7 @@ export default function PatientDashboard() {
                       {[
                         rx.target_reps ? `${rx.target_reps} reps` : null,
                         rx.frequency ?? null,
-                        `${rx.compliance.sessions_completed} done`,
+                        `${rx.compliance?.sessions_completed ?? 0} done`,
                       ]
                         .filter(Boolean)
                         .join(" · ")}

@@ -110,7 +110,8 @@ export function AIRecommendation({ recommendation, loading, patientId, onRefresh
   const IntensityIcon = intensityCfg.icon
   const compositePercent = Math.round((recommendation.composite_score ?? 0) * 100)
   const warnings   = Array.isArray(recommendation.warnings)              ? recommendation.warnings              : []
-  const exercises  = Array.isArray(recommendation.recommended_exercises) ? recommendation.recommended_exercises : []
+  const exercises = (Array.isArray(recommendation.recommended_exercises) ? recommendation.recommended_exercises : [])
+    .filter((ex): ex is { name: string; sets: number; reps: number; reason: string } => typeof ex === "object" && ex !== null)
   const showExercises = exercises.length > 0 ? exercises : DEFAULT_EXERCISES
   const reasoning  = recommendation.reasoning || "Based on your recent session data, this plan has been tailored to support your current recovery stage."
 

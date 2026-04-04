@@ -172,7 +172,7 @@ export default function PatientReportsPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   {/* Key Issues */}
-                  {report.key_issues?.length > 0 && (
+                  {(report.key_issues?.length ?? 0) > 0 && (
                     <Card>
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -182,7 +182,7 @@ export default function PatientReportsPage() {
                       </CardHeader>
                       <CardContent>
                         <ul className="space-y-1.5">
-                          {report.key_issues.map((issue, i) => (
+                          {report.key_issues!.map((issue, i) => (
                             <li key={i} className="text-sm text-foreground flex items-start gap-2">
                               <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-yellow-500 shrink-0" />
                               {issue}
@@ -194,7 +194,7 @@ export default function PatientReportsPage() {
                   )}
 
                   {/* Recommendations */}
-                  {report.recommendations?.length > 0 && (
+                  {(report.recommendations?.length ?? 0) > 0 && (
                     <Card>
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -204,7 +204,7 @@ export default function PatientReportsPage() {
                       </CardHeader>
                       <CardContent>
                         <ul className="space-y-1.5">
-                          {report.recommendations.map((rec, i) => (
+                          {report.recommendations!.map((rec, i) => (
                             <li key={i} className="text-sm text-foreground flex items-start gap-2">
                               <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
                               {rec}

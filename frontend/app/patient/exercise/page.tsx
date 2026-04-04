@@ -190,7 +190,7 @@ export default function PatientExercisePage() {
                   <span>Target: {matchingPrescription.target_reps} reps</span>
                 )}
                 {matchingPrescription.frequency && <span>· {matchingPrescription.frequency}</span>}
-                <span>· {matchingPrescription.compliance.sessions_completed} sessions done</span>
+                <span>· {matchingPrescription.compliance?.sessions_completed ?? 0} sessions done</span>
               </div>
               <Badge variant="secondary" className="ml-auto bg-primary/10 text-primary text-xs">
                 {matchingPrescription.priority} priority

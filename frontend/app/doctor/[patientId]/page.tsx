@@ -894,7 +894,7 @@ export default function PatientDetailPage({
                             {[
                               rx.target_reps ? `${rx.target_reps} reps` : null,
                               rx.frequency?.replace("_", " "),
-                              `${rx.compliance.sessions_completed} sessions done`,
+                              `${rx.compliance?.sessions_completed ?? 0} sessions done`,
                             ]
                               .filter(Boolean)
                               .join(" · ")}
@@ -1020,11 +1020,11 @@ export default function PatientDetailPage({
                       </CardHeader>
                       <CardContent className="space-y-3 text-sm">
                         <p className="text-foreground leading-relaxed">{rj.summary}</p>
-                        {rj.key_issues?.length > 0 && (
+                        {(rj.key_issues?.length ?? 0) > 0 && (
                           <div>
                             <p className="font-medium text-muted-foreground mb-1">Key Issues</p>
                             <ul className="space-y-1">
-                              {rj.key_issues.map((issue, j) => (
+                              {rj.key_issues!.map((issue, j) => (
                                 <li key={j} className="flex items-start gap-2 text-foreground">
                                   <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
                                   {issue}
@@ -1033,11 +1033,11 @@ export default function PatientDetailPage({
                             </ul>
                           </div>
                         )}
-                        {rj.recommendations?.length > 0 && (
+                        {(rj.recommendations?.length ?? 0) > 0 && (
                           <div>
                             <p className="font-medium text-muted-foreground mb-1">Recommendations</p>
                             <ul className="space-y-1">
-                              {rj.recommendations.map((rec, j) => (
+                              {rj.recommendations!.map((rec, j) => (
                                 <li key={j} className="flex items-start gap-2 text-foreground">
                                   <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
                                   {rec}
