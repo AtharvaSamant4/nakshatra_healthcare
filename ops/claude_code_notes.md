@@ -14,6 +14,10 @@ Before implementing any feature, read these context files **in order**:
 4. `context/file_mapping.md` — know where to write code
 5. `context/decisions.md` — understand why things are the way they are
 
+**Also read before touching any existing backend file:**
+
+6. `backend/BACKEND_AUDIT.md` — full record of what has been implemented, how each file works, and notable decisions made during implementation. Read this to avoid re-implementing or conflicting with existing logic.
+
 ---
 
 ## Hard Rules
@@ -50,6 +54,11 @@ Before implementing any feature, read these context files **in order**:
 - All Supabase calls go through `db/supabase_client.py`
 - Gemini calls go through `services/gemini_service.py` with try/except and fallback
 - Return hardcoded fallback feedback if Gemini fails — never let the demo break
+- Settings loaded via `get_settings()` from `app/config/settings.py` — never use `os.getenv` directly
+- Exercise models live in `backend/app/models/exercise_models.py` (not in `session_models.py`)
+- Gemini SDK is `google-genai` (`from google import genai`) — do NOT use `google-generativeai` (deprecated)
+- Gemini model is `gemini-2.5-flash` — stored as `_MODEL` constant in `gemini_service.py`
+- `feedback_service.get_feedback()` requires both `session_id` and `session_type` — always pass both
 
 ### 5. Data Rules
 
@@ -74,6 +83,12 @@ Before implementing any feature, read these context files **in order**:
 | Adding new API endpoints not in contract | Ask first — contract is frozen |
 | Hardcoding user IDs | Get from `UserContext` (frontend) or request params (backend) |
 | Skipping error handling on Gemini | Always wrap in try/except with fallback response |
+| Using `os.getenv` directly | Import `get_settings()` from `app/config/settings.py` |
+| Adding SQL GROUP BY for aggregation | Python-side aggregation is correct for V1 scale (see decision 12) |
+| Importing Supabase client directly | Always call `get_supabase()` from `db/supabase_client.py` |
+| Using `google-generativeai` or `import google.generativeai` | Use `google-genai`: `from google import genai` (see decision 13) |
+| Using model name `gemini-pro` | Use `_MODEL = "gemini-2.5-flash"` in `gemini_service.py` |
+| Calling `feedback_service.get_feedback(session_id)` with one arg | Signature is `get_feedback(session_id, session_type)` — always pass both |
 
 ---
 

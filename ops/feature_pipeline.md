@@ -53,13 +53,15 @@
 
 ## Priority Order
 
-1. Supabase tables + seed data
-2. `exerciseEngine.ts` + Users/Exercises API
-3. MediaPipe + live exercise session
-4. Sessions API + Game Sessions API + Memory game
-5. Gemini integration + feedback display
-6. Dashboard with charts
-7. Remaining games + polish
+> Legend: ✅ Done · 🔲 Not started
+
+1. ✅ Supabase tables + seed data — `seed/exercises.json` written (8 exercises). DB tables must be created in Supabase manually using `context/schema.md` SQL.
+2. ✅ Users/Exercises API — `POST /api/users`, `GET /api/users[/{id}]`, `GET /api/exercises[/{id}]` all implemented.
+3. 🔲 `exerciseEngine.ts` + MediaPipe + live exercise session — frontend work, not started.
+4. ✅ Sessions API + Game Sessions API — `POST/GET /api/sessions[/{id}]` and `POST/GET /api/game-sessions` implemented.
+5. ✅ Gemini integration + feedback display — `gemini_service.py` with fallback, `feedback_service.py`, `GET /api/feedback/{session_id}` with 202 processing state all implemented.
+6. ✅ Dashboard / Progress API — `GET /api/progress/{user_id}` and `/exercise-trend` implemented. Frontend charts not started.
+7. 🔲 Remaining games (Reaction, Pattern) + polish — frontend work, not started.
 
 ---
 
@@ -84,3 +86,25 @@
 □ Integration test
 □ Update changelog
 ```
+
+## Backend Implementation Status (as of 2026-04-04)
+
+All backend Python files are fully implemented. The backend is ready to run.
+
+| Layer | Status |
+|---|---|
+| Infrastructure (`settings.py`, `supabase_client.py`) | ✅ Complete |
+| Users API (3 endpoints) | ✅ Complete |
+| Exercises API (2 endpoints) | ✅ Complete |
+| Exercise Sessions API (3 endpoints) | ✅ Complete |
+| Game Sessions API (2 endpoints) | ✅ Complete |
+| Gemini Service (with fallback) | ✅ Complete |
+| Feedback Service + API (1 endpoint) | ✅ Complete |
+| Progress API (2 endpoints) | ✅ Complete |
+| Seed data (`exercises.json`) | ✅ Complete — needs manual Supabase import |
+
+**Remaining before full integration test:**
+- Create Supabase tables using SQL in `context/schema.md`
+- Import `seed/exercises.json` into `exercises` table
+- Fill in `backend/.env` from `.env.example`
+- Implement frontend (see priority steps 3 and 7 above)
