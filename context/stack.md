@@ -11,7 +11,7 @@
 | **Frontend** | Next.js (App Router) | 14+ | React-based, file-system routing, SSR/CSR flexibility, fast dev experience |
 | **Backend** | FastAPI (Python) | 0.100+ | Async, auto-docs (Swagger), Pydantic validation, rapid prototyping |
 | **Database** | Supabase (PostgreSQL) | — | Managed Postgres, instant REST API, free tier, zero DevOps |
-| **AI** | Google Gemini API | gemini-pro | Generous free tier, structured JSON output, long context window |
+| **AI** | Google Gemini API | gemini-2.5-flash | Generous free tier, structured JSON output, long context window |
 | **Pose Tracking** | MediaPipe.js | @mediapipe/tasks-vision | Runs in browser, no server GPU needed, 33 landmark points, lightweight |
 
 ---
@@ -43,7 +43,7 @@
 | `fastapi` | Web framework | Async, auto-validation, auto-docs, fastest Python framework |
 | `uvicorn` | ASGI server | Production-grade, async, works with FastAPI |
 | `supabase` | Database client | Official Python client for Supabase |
-| `google-generativeai` | Gemini API | Official Google SDK for Gemini |
+| `google-genai` | Gemini API | Official Google SDK for Gemini (replaces deprecated `google-generativeai`) |
 | `pydantic` | Data validation | Built into FastAPI, enforces request/response schemas |
 | `python-dotenv` | Env vars | Load `.env` file for local dev |
 

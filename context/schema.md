@@ -1,6 +1,7 @@
 # Database Schema
 
 > Supabase PostgreSQL · 5 tables · UUID primary keys · timestamptz timestamps
+> **Canonical SQL file:** `schema.sql` (repo root) — run this in Supabase SQL Editor to create everything.
 
 ---
 
@@ -17,6 +18,8 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 ```
 
 `ai_feedback.session_id` is a **polymorphic FK** — it points to either `exercise_sessions.id` or `game_sessions.id`, disambiguated by `session_type`.
+
+All child-table FKs use `ON DELETE CASCADE` — deleting a user removes all their sessions and feedback.
 
 ---
 
@@ -56,6 +59,10 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 }
 ```
 
+**Seed data:** 8 exercises across shoulder/elbow/knee/hip. Defined as SQL INSERTs in `schema.sql` and also available as `backend/seed/exercises.json` for programmatic import.
+
+**Thumbnail path drift:** `schema.sql` seed rows use `thumbnail_url` paths like `/images/exercises/<name>.png`. `backend/seed/exercises.json` currently uses `/images/<name>.png` (no `exercises/` segment). Align URLs if you import from JSON so the frontend and CDN stay consistent.
+
 ---
 
 ## Table: `exercise_sessions`
@@ -63,13 +70,13 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id`, NOT NULL | |
-| `exercise_id` | `uuid` | FK → `exercises.id`, NOT NULL | |
+| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
+| `exercise_id` | `uuid` | FK → `exercises.id` ON DELETE CASCADE, NOT NULL | |
 | `reps_completed` | `int` | NOT NULL | |
-| `avg_angle` | `float` | | Average peak angle across reps |
-| `min_angle` | `float` | | Min angle reached |
-| `max_angle` | `float` | | Max angle reached |
-| `form_score` | `float` | | 0.0 – 1.0 scale |
+| `avg_angle` | `double precision` | | Average peak angle across reps |
+| `min_angle` | `double precision` | | Min angle reached |
+| `max_angle` | `double precision` | | Max angle reached |
+| `form_score` | `double precision` | | 0.0 – 1.0 scale |
 | `duration_seconds` | `int` | | Total session time |
 | `angle_history` | `jsonb` | nullable | `[{ "rep": 1, "peak_angle": 155 }, ...]` |
 | `started_at` | `timestamptz` | NOT NULL | |
@@ -82,11 +89,11 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id`, NOT NULL | |
+| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
 | `game_type` | `text` | NOT NULL | `"memory"`, `"reaction"`, `"pattern"` |
 | `score` | `int` | NOT NULL | Final score |
-| `accuracy` | `float` | nullable | 0.0 – 1.0 |
-| `avg_reaction_ms` | `float` | nullable | For reaction game |
+| `accuracy` | `double precision` | nullable | 0.0 – 1.0 |
+| `avg_reaction_ms` | `double precision` | nullable | For reaction game |
 | `level_reached` | `int` | nullable | For pattern game |
 | `duration_seconds` | `int` | | |
 | `game_metadata` | `jsonb` | nullable | Game-specific extra data |
@@ -99,7 +106,7 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `uuid` | PK, default `gen_random_uuid()` | |
-| `user_id` | `uuid` | FK → `users.id`, NOT NULL | |
+| `user_id` | `uuid` | FK → `users.id` ON DELETE CASCADE, NOT NULL | |
 | `session_id` | `uuid` | NOT NULL | Points to `exercise_sessions.id` or `game_sessions.id` |
 | `session_type` | `text` | NOT NULL | `"exercise"` or `"game"` |
 | `summary` | `text` | | Gemini-generated summary |
@@ -111,84 +118,47 @@ exercises ── 1:N ──→ exercise_sessions (via exercise_id)
 
 ---
 
-## SQL Creation Reference
+## SQL Reference
+
+> **DO NOT copy SQL from this file.** Use the canonical `schema.sql` in the repo root.
+> It contains the complete DDL (tables + indexes + seed INSERTs) ready to paste into Supabase SQL Editor.
+
+The SQL below is a **summary** for quick reference only:
 
 ```sql
--- Users
-CREATE TABLE users (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  email text UNIQUE,
-  age int,
-  condition_notes text,
-  created_at timestamptz DEFAULT now()
-);
+-- Required extension
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Exercises (seed data)
-CREATE TABLE exercises (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  description text,
-  body_part text NOT NULL,
-  difficulty text DEFAULT 'beginner',
-  angle_config jsonb NOT NULL,
-  instructions text,
-  thumbnail_url text
-);
-
--- Exercise Sessions
-CREATE TABLE exercise_sessions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id),
-  exercise_id uuid NOT NULL REFERENCES exercises(id),
-  reps_completed int NOT NULL,
-  avg_angle float,
-  min_angle float,
-  max_angle float,
-  form_score float,
-  duration_seconds int,
-  angle_history jsonb,
-  started_at timestamptz NOT NULL,
-  completed_at timestamptz NOT NULL
-);
-
--- Game Sessions
-CREATE TABLE game_sessions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id),
-  game_type text NOT NULL,
-  score int NOT NULL,
-  accuracy float,
-  avg_reaction_ms float,
-  level_reached int,
-  duration_seconds int,
-  game_metadata jsonb,
-  completed_at timestamptz DEFAULT now()
-);
-
--- AI Feedback
-CREATE TABLE ai_feedback (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id),
-  session_id uuid NOT NULL,
-  session_type text NOT NULL,
-  summary text,
-  tips jsonb,
-  encouragement text,
-  focus_areas jsonb,
-  recovery_score int,
-  created_at timestamptz DEFAULT now()
-);
+-- 5 tables: users, exercises, exercise_sessions, game_sessions, ai_feedback
+-- All FKs use ON DELETE CASCADE
+-- Float columns use `double precision` (PostgreSQL standard)
+-- See schema.sql for full CREATE TABLE statements
 ```
 
 ---
 
-## Indexes (Recommended)
+## Indexes
 
 ```sql
 CREATE INDEX idx_exercise_sessions_user ON exercise_sessions(user_id);
 CREATE INDEX idx_exercise_sessions_exercise ON exercise_sessions(exercise_id);
+CREATE INDEX idx_exercise_sessions_completed_at ON exercise_sessions(completed_at DESC);
 CREATE INDEX idx_game_sessions_user ON game_sessions(user_id);
+CREATE INDEX idx_game_sessions_completed_at ON game_sessions(completed_at DESC);
 CREATE INDEX idx_ai_feedback_session ON ai_feedback(session_id);
 CREATE INDEX idx_ai_feedback_user ON ai_feedback(user_id);
 ```
+
+7 indexes total. The `completed_at DESC` indexes enable efficient "most recent sessions first" queries used by the progress service.
+
+---
+
+## Schema Notes
+
+| Topic | Detail |
+|---|---|
+| **Float type** | PostgreSQL `double precision` (8 bytes). Pydantic models use Python `float`. API contract uses JSON numbers. All are compatible. |
+| **ON DELETE CASCADE** | Deleting a user cascades to all their sessions and feedback. Safe for demo; review for production. |
+| **pgcrypto extension** | Required for `gen_random_uuid()` on Supabase. Already enabled on most Supabase projects, but the SQL includes it defensively. |
+| **Polymorphic FK** | `ai_feedback.session_id` is NOT a real FK in PostgreSQL (no `REFERENCES`). It's an application-level convention, disambiguated by `session_type`. |
+| **Seed data** | 8 exercises with deterministic UUIDs (`a1000001-0001-4000-8000-00000000000X`). Both `schema.sql` INSERTs and `backend/seed/exercises.json` contain the same exercises. |

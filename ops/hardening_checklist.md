@@ -24,8 +24,8 @@ Items marked 🔲 still require environment setup or frontend work before they c
 | No uncaught exceptions — global handler in place | ✅ Implemented in `main.py` | — |
 
 **Before running the checklist below, complete these setup steps:**
-1. Create Supabase tables: run SQL from `context/schema.md`
-2. Import seed exercises: load `backend/seed/exercises.json` into `exercises` table
+1. Create Supabase tables: run `schema.sql` (repo root) in Supabase SQL Editor
+2. Seed exercises are included in `schema.sql` INSERTs (also available as `backend/seed/exercises.json`)
 3. Copy `backend/.env.example` → `backend/.env` and fill in `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`
 4. `pip install -r backend/requirements.txt` ← installs `google-genai` (new SDK)
 5. `uvicorn app.main:app --reload` — works from **any** directory now (`.env` path is absolute)
@@ -54,26 +54,23 @@ Items marked 🔲 still require environment setup or frontend work before they c
 
 - [ ] `frontend/.env.local` has `NEXT_PUBLIC_API_URL=http://localhost:8000`
 - [ ] App starts without errors: `npm run dev`
-- [ ] Home page redirects to `/dashboard`
+- [ ] Home **`/`** loads the dashboard (`frontend/app/page.tsx` — there is no separate `/dashboard` route)
 - [ ] Dashboard loads and shows data (or empty state)
-- [ ] Exercise library shows exercise cards
-- [ ] Clicking an exercise opens the start page
-- [ ] Webcam permission prompt appears
-- [ ] MediaPipe model loads (check loading indicator)
-- [ ] Skeleton overlay renders on the webcam feed
-- [ ] Rep counter increments during exercise
-- [ ] Form indicator shows feedback (green/red)
-- [ ] Session results display after ending exercise
-- [ ] AI feedback card loads on results page
-- [ ] At least 1 cognitive game is playable (Memory)
-- [ ] Game results page shows score + AI feedback
+- [ ] **Create at least one user** (`POST /api/users` via Swagger/curl — UI has no create-user flow yet)
+- [ ] Exercise page (`/exercise`) loads catalog from `GET /api/exercises` and allows run/stop (demo uses simulated reps, not full MediaPipe pipeline)
+- [ ] Webcam permission prompt may appear (feed component present)
+- [ ] Rep counter increments while session is active
+- [ ] Session summary displays after ending exercise
+- [ ] Results page (`/results`) shows progress + recent AI snippets from **`GET /api/progress`** (per-session `GET /api/feedback` poll is not wired in UI)
+- [ ] At least 1 cognitive game is playable (Memory; Reaction on same page)
+- [ ] Games page persists scores via `POST /api/game-sessions` (Pattern game not in UI; API supports it)
 - [ ] User select dropdown works in navbar
 - [ ] No console errors in browser DevTools
 
 ## Integration Checks
 
-- [ ] Exercise flow: library → start → do reps → end → results → feedback
-- [ ] Game flow: hub → play game → finish → results → feedback
+- [ ] Exercise flow: `/exercise` → start → stop → summary (session `POST` returns `feedback_id`; full feedback poll optional)
+- [ ] Game flow: `/games` → play → `POST` game session → stats refresh
 - [ ] Dashboard shows data after completing sessions
 - [ ] API calls visible in Network tab with correct payloads
 - [ ] Data appears in Supabase tables after sessions
@@ -91,8 +88,8 @@ Items marked 🔲 still require environment setup or frontend work before they c
 
 ## Quick Smoke Test (2 minutes)
 
-1. Open `http://localhost:3000` → should see dashboard
-2. Go to Exercises → pick one → Start → see webcam + skeleton
-3. Do a few reps → End session → see results + AI feedback
-4. Go to Games → play Memory → finish → see score + feedback
-5. Go back to Dashboard → verify new session appears
+1. Open `http://localhost:3000` → dashboard at `/`
+2. Ensure a user exists; select user in navbar
+3. Go to **Exercise** → Start → Stop → session should `POST` to backend
+4. Go to **Games** → Memory → finish → `POST` game session
+5. Dashboard / Results → verify aggregates update (`GET /api/progress`, session lists)

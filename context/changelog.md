@@ -31,6 +31,26 @@ None / describe if any.
 
 <!-- Add entries below in reverse chronological order (newest first) -->
 
+### [2026-04-04] — Pre-integration audit (docs only)
+
+**Author:** Cursor / audit
+**Type:** docs
+**Files changed:**
+- `context/file_mapping.md` (rewritten to match `frontend/app`, `frontend/lib`, `frontend/components`)
+- `context/architecture.md` (implementation notes: paths, sync Gemini, user bootstrap)
+- `context/api_contract.md` (implementation notes: 422 shape, feedback timing, coverage gaps)
+- `context/schema.md` (thumbnail URL drift between SQL seed and `exercises.json`)
+- `context/known_integration_gaps.md` (new — consolidated drift list)
+- `ops/hardening_checklist.md` (frontend smoke steps aligned with actual routes)
+
+**What changed:** Documented real integration risks and corrected file paths so onboarding matches the repo.
+
+**Why:** Prior context referred to `frontend/src/...` and flows (library pages, async-only feedback) that do not match the current tree or backend behavior.
+
+**Breaking changes:** None (documentation only).
+
+---
+
 ### [2026-04-04] — Backend Bug Fixes (5 issues)
 
 **Author:** Claude Code

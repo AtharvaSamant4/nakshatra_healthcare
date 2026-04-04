@@ -11,7 +11,8 @@
 - [ ] Identify which user flow this belongs to (exercise, game, dashboard)
 - [ ] Read `context/file_mapping.md` to locate all files involved
 - [ ] Read `context/api_contract.md` for API endpoints
-- [ ] Read `context/schema.md` for database tables
+- [ ] Read `context/schema.md` for database tables and relationships
+- [ ] Check `schema.sql` (repo root) for canonical DDL if creating/modifying tables
 - [ ] Read `context/decisions.md` if relevant
 
 ### Step 2: Check Dependencies
@@ -55,7 +56,7 @@
 
 > Legend: ✅ Done · 🔲 Not started
 
-1. ✅ Supabase tables + seed data — `seed/exercises.json` written (8 exercises). DB tables must be created in Supabase manually using `context/schema.md` SQL.
+1. ✅ Supabase tables + seed data — `schema.sql` (repo root) contains all DDL + 8 seed exercise INSERTs. Run in Supabase SQL Editor.
 2. ✅ Users/Exercises API — `POST /api/users`, `GET /api/users[/{id}]`, `GET /api/exercises[/{id}]` all implemented.
 3. 🔲 `exerciseEngine.ts` + MediaPipe + live exercise session — frontend work, not started.
 4. ✅ Sessions API + Game Sessions API — `POST/GET /api/sessions[/{id}]` and `POST/GET /api/game-sessions` implemented.
@@ -104,7 +105,7 @@ All backend Python files are fully implemented. The backend is ready to run.
 | Seed data (`exercises.json`) | ✅ Complete — needs manual Supabase import |
 
 **Remaining before full integration test:**
-- Create Supabase tables using SQL in `context/schema.md`
-- Import `seed/exercises.json` into `exercises` table
+- Create Supabase tables using `schema.sql` (repo root) in Supabase SQL Editor
+- Seed data is included in `schema.sql` INSERTs (also in `seed/exercises.json` for programmatic import)
 - Fill in `backend/.env` from `.env.example`
 - Implement frontend (see priority steps 3 and 7 above)

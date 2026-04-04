@@ -1,7 +1,7 @@
 # File Mapping
 
-> Feature → File mapping for the entire system.
-> Use this to find where to implement or debug a specific feature.
+> Feature → File mapping for the entire system.  
+> **Paths below match the current repo layout** (`frontend/app`, `frontend/lib`, `frontend/components`).
 
 ---
 
@@ -9,22 +9,17 @@
 
 | Step | File(s) |
 |---|---|
-| Exercise library page | `frontend/src/app/exercises/page.tsx` |
-| Exercise card component | `frontend/src/components/exercises/ExerciseCard.tsx` |
-| Live exercise session | `frontend/src/app/exercises/[id]/start/page.tsx` |
-| Webcam + MediaPipe init | `frontend/src/components/exercises/WebcamFeed.tsx` |
-| Skeleton overlay | `frontend/src/components/exercises/PoseCanvas.tsx` |
-| Rep counter display | `frontend/src/components/exercises/RepCounter.tsx` |
-| Form quality indicator | `frontend/src/components/exercises/FormIndicator.tsx` |
-| Angle calc + rep logic | `frontend/src/lib/exerciseEngine.ts` |
-| MediaPipe configuration | `frontend/src/lib/mediapipe.ts` |
-| Exercise definitions | `frontend/src/lib/exercises.ts` |
-| Session results page | `frontend/src/app/exercises/[id]/results/page.tsx` |
-| Session summary component | `frontend/src/components/exercises/SessionSummary.tsx` |
-| Save session (API call) | `frontend/src/lib/api.ts` → `POST /api/sessions` |
+| Dashboard (also home `/`) | `frontend/app/page.tsx` |
+| Live exercise session | `frontend/app/exercise/page.tsx` |
+| Webcam surface | `frontend/components/exercise/webcam-feed.tsx` |
+| Session controls + rep UI | `frontend/components/exercise/exercise-controls.tsx` |
+| Post-session summary card | `frontend/components/exercise/session-summary.tsx` |
+| Save session (API) | `frontend/lib/api.ts` → `sessionsApi.create` → `POST /api/sessions` |
 | Sessions API router | `backend/app/routers/sessions.py` |
 | Session service logic | `backend/app/services/session_service.py` |
 | Session Pydantic models | `backend/app/models/session_models.py` |
+
+> **See also:** `context/known_integration_gaps.md` for contract/UI/backend drift (users bootstrap, feedback polling, pattern game, etc.).
 
 ---
 
@@ -32,17 +27,15 @@
 
 | Step | File(s) |
 |---|---|
-| Games hub page | `frontend/src/app/games/page.tsx` |
-| Game card component | `frontend/src/components/games/GameCard.tsx` |
-| Memory game | `frontend/src/app/games/memory/page.tsx` + `frontend/src/components/games/MemoryGame.tsx` |
-| Reaction game | `frontend/src/app/games/reaction/page.tsx` + `frontend/src/components/games/ReactionGame.tsx` |
-| Pattern game | `frontend/src/app/games/pattern/page.tsx` + `frontend/src/components/games/PatternGame.tsx` |
-| Game results page | `frontend/src/app/games/[type]/results/page.tsx` |
-| Game result component | `frontend/src/components/games/GameResult.tsx` |
-| Save game session | `frontend/src/lib/api.ts` → `POST /api/game-sessions` |
+| Games hub (Memory + Reaction tabs) | `frontend/app/games/page.tsx` |
+| Memory game | `frontend/components/games/memory-game.tsx` |
+| Reaction game | `frontend/components/games/reaction-game.tsx` |
+| Save game session | `frontend/lib/api.ts` → `gameSessionsApi.create` → `POST /api/game-sessions` |
 | Games API router | `backend/app/routers/games.py` |
 | Game service logic | `backend/app/services/game_service.py` |
 | Game Pydantic models | `backend/app/models/game_models.py` |
+
+> **Contract vs UI:** API supports `game_type: "pattern"`; current UI does not expose a Pattern game.
 
 ---
 
@@ -50,17 +43,15 @@
 
 | Step | File(s) |
 |---|---|
-| Feedback display card | `frontend/src/components/feedback/AIFeedbackCard.tsx` |
-| Feedback loading state | `frontend/src/components/feedback/FeedbackLoader.tsx` |
-| Fetch feedback | `frontend/src/lib/api.ts` → `GET /api/feedback/{session_id}` |
+| Recent feedback on dashboard | `frontend/components/dashboard/ai-insights.tsx` (data from `GET /api/progress/{user_id}`) |
+| Recent feedback on results | `frontend/components/results/ai-feedback.tsx` (same source) |
+| Fetch feedback by session | `frontend/lib/api.ts` → `feedbackApi.get` → `GET /api/feedback/{session_id}?session_type=` |
 | Feedback API router | `backend/app/routers/feedback.py` |
-| Feedback service (store + get) | `backend/app/services/feedback_service.py` |
-| Gemini API integration | `backend/app/services/gemini_service.py` |
-| Feedback Pydantic models | `backend/app/models/feedback_models.py` |
+| Feedback service | `backend/app/services/feedback_service.py` |
+| Gemini integration | `backend/app/services/gemini_service.py` |
+| Feedback models | `backend/app/models/feedback_models.py` |
 
-> **Gemini trigger flow:** `session_service.py` / `game_service.py` call
-> `gemini_service.generate_*_feedback()` → then `feedback_service.store_feedback()`.
-> `feedback.py` router calls `feedback_service.get_feedback()` for reads.
+> **Gap:** `feedbackApi` exists but is **not** wired from exercise/game completion UI; `feedback_id` from `POST` responses is largely unused. Dashboard/results show **aggregated** `recent_feedback` from progress, not per-session poll.
 
 ---
 
@@ -68,16 +59,16 @@
 
 | Step | File(s) |
 |---|---|
-| Dashboard page | `frontend/src/app/dashboard/page.tsx` |
-| Progress chart | `frontend/src/components/dashboard/ProgressChart.tsx` |
-| Recent sessions list | `frontend/src/components/dashboard/RecentSessions.tsx` |
-| AI insight card | `frontend/src/components/dashboard/InsightCard.tsx` |
-| Stat card (single metric) | `frontend/src/components/dashboard/StatCard.tsx` |
-| Fetch dashboard data | `frontend/src/lib/api.ts` → `GET /api/progress/{user_id}` |
-| Fetch exercise trend | `frontend/src/lib/api.ts` → `GET /api/progress/{user_id}/exercise-trend` |
-| Progress API router | `backend/app/routers/progress.py` |
+| Dashboard | `frontend/app/page.tsx` |
+| Progress chart | `frontend/components/dashboard/progress-chart.tsx` |
+| Recent sessions | `frontend/components/dashboard/recent-sessions.tsx` |
+| Stats cards | `frontend/components/dashboard/stats-card.tsx` |
+| Results overview | `frontend/app/results/page.tsx` |
+| Weekly-style chart (uses `exercise_progress` dates) | `frontend/components/results/weekly-chart.tsx` |
+| Fetch dashboard aggregate | `frontend/lib/api.ts` → `progressApi.get` → `GET /api/progress/{user_id}` |
+| Exercise trend (optional charts) | `frontend/lib/api.ts` → `progressApi.trend` → `GET /api/progress/{user_id}/exercise-trend` (**not used by current chart components**) |
+| Progress router | `backend/app/routers/progress.py` |
 | Progress service | `backend/app/services/progress_service.py` |
-| Progress Pydantic models | `backend/app/models/progress_models.py` |
 
 ---
 
@@ -85,13 +76,12 @@
 
 | Step | File(s) |
 |---|---|
-| Profile page | `frontend/src/app/profile/page.tsx` |
-| User context provider | `frontend/src/context/UserContext.tsx` |
-| User select (navbar) | `frontend/src/components/layout/Navbar.tsx` |
-| Fetch/create users | `frontend/src/lib/api.ts` → `GET/POST /api/users` |
-| Users API router | `backend/app/routers/users.py` |
-| User service | `backend/app/services/user_service.py` |
-| User Pydantic models | `backend/app/models/user_models.py` |
+| User context + bootstrap list | `frontend/lib/user-context.tsx` → `usersApi.list()` |
+| User switcher | `frontend/components/navbar.tsx` |
+| Create user API (contract) | `frontend/lib/api.ts` → `usersApi.create` → `POST /api/users` |
+| Users router / service | `backend/app/routers/users.py`, `backend/app/services/user_service.py` |
+
+> **Gap:** No page or flow calls `usersApi.create`. Empty `users` table ⇒ `selectedUserId` stays `null` ⇒ most API-backed features never fire.
 
 ---
 
@@ -99,20 +89,12 @@
 
 | Component | File |
 |---|---|
-| Root layout | `frontend/src/app/layout.tsx` |
-| Global styles | `frontend/src/app/globals.css` |
-| Home / redirect | `frontend/src/app/page.tsx` |
-| Navbar | `frontend/src/components/layout/Navbar.tsx` |
-| Sidebar (optional) | `frontend/src/components/layout/Sidebar.tsx` |
-| Page wrapper | `frontend/src/components/layout/PageWrapper.tsx` |
-| Shared Button | `frontend/src/components/shared/Button.tsx` |
-| Shared Card | `frontend/src/components/shared/Card.tsx` |
-| Shared Modal | `frontend/src/components/shared/Modal.tsx` |
-| Loading spinner | `frontend/src/components/shared/LoadingSpinner.tsx` |
-| Empty state | `frontend/src/components/shared/EmptyState.tsx` |
-| TypeScript types | `frontend/src/types/index.ts` |
-| API client wrapper | `frontend/src/lib/api.ts` |
-| Utility helpers | `frontend/src/lib/utils.ts` |
+| Root layout + `UserProvider` | `frontend/app/layout.tsx` |
+| Global styles | `frontend/app/globals.css` |
+| App shell + navbar | `frontend/components/app-layout.tsx` |
+| API client + types | `frontend/lib/api.ts` |
+| Utilities | `frontend/lib/utils.ts` |
+| Legacy mock exports (unused) | `frontend/lib/mock-data.ts` |
 
 ---
 
@@ -120,21 +102,22 @@
 
 | Component | File |
 |---|---|
-| FastAPI app entry | `backend/app/main.py` |
+| FastAPI entry | `backend/app/main.py` |
 | Supabase client | `backend/app/db/supabase_client.py` |
-| Config / env vars | `backend/app/config/settings.py` |
-| Exercise seed data | `backend/seed/exercises.json` |
+| Settings / env | `backend/app/config/settings.py` |
+| Canonical DDL + seed | `schema.sql` (repo root) |
+| JSON exercise seed (optional import) | `backend/seed/exercises.json` |
 | Dependencies | `backend/requirements.txt` |
-| Backend env vars | `backend/.env` |
-| Implementation audit | `backend/BACKEND_AUDIT.md` |
 
-## Backend Models
+---
 
-| Model File | Pydantic Classes |
+## Backend Models (Pydantic)
+
+| File | Classes |
 |---|---|
-| `backend/app/models/user_models.py` | `UserCreate`, `UserResponse`, `UserListItem` |
-| `backend/app/models/exercise_models.py` | `AngleConfig`, `ExerciseResponse` |
-| `backend/app/models/session_models.py` | `AngleHistoryItem`, `SessionCreate`, `SessionCreateResponse`, `SessionDetail`, `SessionListItem`, `SessionListResponse` |
-| `backend/app/models/game_models.py` | `GameSessionCreate`, `GameSessionCreateResponse`, `GameSessionListItem`, `GameSessionListResponse` |
-| `backend/app/models/feedback_models.py` | `FeedbackResponse`, `FeedbackProcessing` |
-| `backend/app/models/progress_models.py` | `ProgressSummary`, `ExerciseProgressDay`, `GameProgressDay`, `RecentFeedbackItem`, `BodyPartBreakdownItem`, `ProgressResponse`, `ExerciseTrendDay`, `ExerciseTrendResponse` |
+| `user_models.py` | `UserCreate`, `UserResponse`, `UserListItem` |
+| `exercise_models.py` | `AngleConfig`, `ExerciseResponse` |
+| `session_models.py` | `AngleHistoryItem`, `SessionCreate`, `SessionCreateResponse`, `SessionDetail`, `SessionListItem`, `SessionListResponse` |
+| `game_models.py` | `GameSessionCreate`, `GameSessionCreateResponse`, `GameSessionListItem`, `GameSessionListResponse` |
+| `feedback_models.py` | `FeedbackResponse`, `FeedbackProcessing` |
+| `progress_models.py` | `ProgressSummary`, `ExerciseProgressDay`, `GameProgressDay`, `RecentFeedbackItem`, `BodyPartBreakdownItem`, `ProgressResponse`, `ExerciseTrendDay`, `ExerciseTrendResponse` |

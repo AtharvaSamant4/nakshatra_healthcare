@@ -84,7 +84,8 @@ Cognitive games follow the same pattern: play in browser → POST score → get 
 │              Game results (JSON) ────────────────┼──→ POST /api/game-sessions
 │                                                  │
 │  Dashboard ←─────────────────────────────────────┼──← GET /api/progress/{user_id}
-│  Results page ←──────────────────────────────────┼──← GET /api/feedback/{session_id}
+│  Results / dashboard ←───────────────────────────┼──← GET /api/progress/{user_id} (includes recent_feedback)
+│  (Optional per-session poll) ←───────────────────┼──← GET /api/feedback/{session_id}
 └──────────────────────────────────────────────────┘
                         │
                         ▼
@@ -101,6 +102,7 @@ Cognitive games follow the same pattern: play in browser → POST score → get 
 │                                                  │
 │  users · exercises · exercise_sessions           │
 │  game_sessions · ai_feedback                     │
+│  (see schema.sql for DDL + seed data)            │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -112,5 +114,19 @@ Cognitive games follow the same pattern: play in browser → POST score → get 
 - **No WebSocket** — REST is sufficient for summary-based communication
 - **No auth for V1** — user-select dropdown, no OAuth/JWT
 - **Single database** — no caches, queues, or secondary stores
-- **Gemini feedback is async** — POST returns immediately, frontend polls for feedback
 - **Chrome-only** — MediaPipe tested on Chrome; other browsers are best-effort
+- **Schema source of truth** — `schema.sql` (repo root) is the canonical DDL; `context/schema.md` documents fields and relationships
+
+---
+
+## Implementation notes (current repo, 2026-04-04)
+
+These points correct common doc drift; see `context/known_integration_gaps.md` for the full list.
+
+| Topic | Documented target | Current behavior |
+|---|---|---|
+| **Frontend paths** | Older docs referred to `frontend/src/...` | App Router lives under **`frontend/app/`**; shared code under **`frontend/lib/`** and **`frontend/components/`**. |
+| **Dashboard URL** | Some checklists mention `/dashboard` | **`/`** is the dashboard (`frontend/app/page.tsx`). |
+| **Gemini timing** | “POST returns immediately; client polls feedback” | **`POST /api/sessions` and `POST /api/game-sessions` await** Gemini + DB insert of `ai_feedback` before responding; `feedback_id` is already valid in the `201` body. `GET /api/feedback` + `202` still exist for edge cases / router behavior. |
+| **Pose pipeline** | MediaPipe + `exerciseEngine.ts` in-browser | Exercise page uses **simulated** reps/form for demo; full CV pipeline files are **not** wired in this layout. |
+| **User bootstrap** | Dropdown selects user | **`GET /api/users` only**; there is **no** UI calling **`POST /api/users`**. Empty DB ⇒ no `selectedUserId` ⇒ most writes never run. |

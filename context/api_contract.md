@@ -405,3 +405,19 @@ All errors follow this shape:
 | `400` | Bad request / validation error |
 | `404` | Resource not found |
 | `500` | Server error / Gemini API failure |
+
+---
+
+## Implementation notes (audit 2026-04-04)
+
+> Locked request/response **shapes** above are still the target. The following describes how the **current backend/frontend** may diverge for integrators.
+
+1. **Validation (`422`)** — FastAPI validation errors return `detail` as a **list** of objects (field + message), not necessarily `{ "detail": "string", "status_code": 422 }`.
+
+2. **`POST /api/sessions` / `POST /api/game-sessions` timing** — Server **waits** for Gemini (or fallback) and inserts `ai_feedback` before returning `201` with `feedback_id`. Polling `GET /api/feedback` is optional, not required for a successful first fetch right after create.
+
+3. **`GET /api/feedback` + `202 Accepted`** — The router may return `202` when no row is found (implementation maps some `404`s from the service to `202`). That conflates “still generating” with “wrong `session_type` / invalid id”. Clients should not treat `202` as a strict guarantee of in-flight generation only.
+
+4. **Frontend coverage** — `GET /api/sessions/{session_id}` and `GET /api/progress/{user_id}/exercise-trend` are implemented on the server; the bundled `frontend/lib/api.ts` does not expose `sessionsApi.get`; `progressApi.trend` exists but is not used by current chart components.
+
+5. **User creation** — Contract defines `POST /api/users`; the shipped UI only lists users (`GET /api/users`). At least one user must exist in Supabase (manual POST or SQL) before session/game writes from the UI.

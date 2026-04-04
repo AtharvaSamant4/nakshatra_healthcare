@@ -10,9 +10,10 @@ Before implementing any feature, read these context files **in order**:
 
 1. `context/architecture.md` — understand the system
 2. `context/api_contract.md` — know the exact API shapes
-3. `context/schema.md` — know the database tables
-4. `context/file_mapping.md` — know where to write code
-5. `context/decisions.md` — understand why things are the way they are
+3. `context/schema.md` — know the database tables and relationships
+4. `schema.sql` (repo root) — canonical DDL + seed data (run this in Supabase)
+5. `context/file_mapping.md` — know where to write code
+6. `context/decisions.md` — understand why things are the way they are
 
 **Also read before touching any existing backend file:**
 
@@ -64,10 +65,12 @@ Before implementing any feature, read these context files **in order**:
 
 - All IDs are UUID v4
 - Timestamps are `timestamptz` (ISO 8601 with timezone)
+- Float columns are `double precision` in PostgreSQL, `float` in Python/Pydantic, JSON numbers in API
 - `form_score` is always 0.0 – 1.0
 - `recovery_score` is always 1 – 10
 - `game_type` is always one of: `"memory"`, `"reaction"`, `"pattern"`
 - `session_type` is always one of: `"exercise"`, `"game"`
+- All FK references use `ON DELETE CASCADE` — see `schema.sql`
 
 ---
 
