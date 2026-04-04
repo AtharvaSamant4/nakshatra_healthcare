@@ -57,8 +57,22 @@ def list_patients(
             query = query.eq("doctor_id", doctor_id)
         if status:
             query = query.eq("status", status)
-        response = query.order("created_at", desc=True).execute()
-        return [PatientListItem(**row) for row in (response.data or [])]
+
+        response = query.execute()
+        patients = response.data or []
+        
+        # Hydrate with alerts
+        try:
+            pat_ids = [p["id"] for p in patients]
+            if pat_ids:
+                al_resp = supabase.table("alerts").select("patient_id").in_("patient_id", pat_ids).execute()
+                alert_ids = {a["patient_id"] for a in (al_resp.data or [])}
+                for p in patients:
+                    p["has_alert"] = p["id"] in alert_ids
+        except:
+            pass
+
+        return [PatientListItem(**row) for row in patients]
     except Exception as exc:
         logger.warning("list_patients failed (migration pending?): %s", exc)
         return []

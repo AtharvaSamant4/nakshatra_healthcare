@@ -25,6 +25,8 @@ import {
   Clock,
   Brain,
   Zap,
+  Layers,
+  Route,
 } from "lucide-react"
 
 function formatDuration(seconds?: number): string {
@@ -46,8 +48,12 @@ export default function ResultsPage() {
   const [lastSession, setLastSession] = useState<SessionListItem | null>(null)
   const [memorySessions, setMemorySessions] = useState<GameSessionListItem[]>([])
   const [reactionSessions, setReactionSessions] = useState<GameSessionListItem[]>([])
+  const [stroopSessions, setStroopSessions] = useState<GameSessionListItem[]>([])
+  const [trailSessions, setTrailSessions] = useState<GameSessionListItem[]>([])
   const [memoryTotal, setMemoryTotal] = useState(0)
   const [reactionTotal, setReactionTotal] = useState(0)
+  const [stroopTotal, setStroopTotal] = useState(0)
+  const [trailTotal, setTrailTotal] = useState(0)
   const [dataLoading, setDataLoading] = useState(false)
 
   useEffect(() => {
@@ -59,14 +65,20 @@ export default function ResultsPage() {
       sessionsApi.list(selectedUserId, 1, 0),
       gameSessionsApi.list(selectedUserId, "memory", 100),
       gameSessionsApi.list(selectedUserId, "reaction", 100),
+      gameSessionsApi.list(selectedUserId, "stroop", 100),
+      gameSessionsApi.list(selectedUserId, "trail_making" as never, 100),
     ])
-      .then(([progressData, sessionData, memoryData, reactionData]) => {
+      .then(([progressData, sessionData, memoryData, reactionData, stroopData, trailData]) => {
         setProgress(progressData)
         setLastSession(sessionData.sessions[0] ?? null)
         setMemorySessions(memoryData.sessions)
         setReactionSessions(reactionData.sessions)
+        setStroopSessions(stroopData.sessions)
+        setTrailSessions(trailData.sessions)
         setMemoryTotal(memoryData.total)
         setReactionTotal(reactionData.total)
+        setStroopTotal(stroopData.total)
+        setTrailTotal(trailData.total)
       })
       .catch(console.error)
       .finally(() => setDataLoading(false))
@@ -104,6 +116,27 @@ export default function ResultsPage() {
       .filter((value): value is number => value != null)
     return average(values)
   }, [reactionSessions])
+
+  const stroopAvgAccuracy = useMemo(() => {
+    const values = stroopSessions.map((s) => s.accuracy).filter((v): v is number => v != null)
+    return average(values)
+  }, [stroopSessions])
+
+  const stroopBestScore = useMemo(() => {
+    if (stroopSessions.length === 0) return null
+    return Math.max(...stroopSessions.map((s) => s.score))
+  }, [stroopSessions])
+
+  const trailAvgAccuracy = useMemo(() => {
+    const values = trailSessions.map((s) => s.accuracy).filter((v): v is number => v != null)
+    return average(values)
+  }, [trailSessions])
+
+  const trailBestTime = useMemo(() => {
+    const durations = trailSessions.map((s) => s.duration_seconds).filter((v): v is number => v != null)
+    if (durations.length === 0) return null
+    return Math.min(...durations)
+  }, [trailSessions])
 
   return (
     <AppLayout>
@@ -253,6 +286,7 @@ export default function ResultsPage() {
 
         {/* Game Stats */}
         <div className="grid gap-4 sm:grid-cols-2">
+          {/* Memory */}
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
@@ -263,28 +297,18 @@ export default function ResultsPage() {
                   <p className="text-sm text-muted-foreground">Memory Game Stats</p>
                   <div className="mt-2 flex gap-4">
                     <div>
-                      <p className="text-lg font-bold text-foreground">
-                        {isLoading ? "--" : memoryTotal}
-                      </p>
+                      <p className="text-lg font-bold text-foreground">{isLoading ? "--" : memoryTotal}</p>
                       <p className="text-xs text-muted-foreground">Games</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-foreground">
-                        {isLoading
-                          ? "--"
-                          : bestMemoryDuration != null
-                          ? formatDuration(bestMemoryDuration)
-                          : "N/A"}
+                        {isLoading ? "--" : bestMemoryDuration != null ? formatDuration(bestMemoryDuration) : "N/A"}
                       </p>
                       <p className="text-xs text-muted-foreground">Best Time</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-foreground">
-                        {isLoading
-                          ? "--"
-                          : memoryAvgAccuracy != null
-                          ? `${Math.round(memoryAvgAccuracy * 100)}%`
-                          : "N/A"}
+                        {isLoading ? "--" : memoryAvgAccuracy != null ? `${Math.round(memoryAvgAccuracy * 100)}%` : "N/A"}
                       </p>
                       <p className="text-xs text-muted-foreground">Avg Accuracy</p>
                     </div>
@@ -293,6 +317,8 @@ export default function ResultsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Reaction */}
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
@@ -303,28 +329,82 @@ export default function ResultsPage() {
                   <p className="text-sm text-muted-foreground">Reaction Game Stats</p>
                   <div className="mt-2 flex gap-4">
                     <div>
-                      <p className="text-lg font-bold text-foreground">
-                        {isLoading ? "--" : reactionTotal}
-                      </p>
+                      <p className="text-lg font-bold text-foreground">{isLoading ? "--" : reactionTotal}</p>
                       <p className="text-xs text-muted-foreground">Games</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-foreground">
-                        {isLoading
-                          ? "--"
-                          : bestReactionScore != null
-                          ? bestReactionScore
-                          : "N/A"}
+                        {isLoading ? "--" : bestReactionScore != null ? bestReactionScore : "N/A"}
                       </p>
                       <p className="text-xs text-muted-foreground">Best Score</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-foreground">
-                        {isLoading
-                          ? "--"
-                          : reactionAvgAccuracy != null
-                          ? `${Math.round(reactionAvgAccuracy * 100)}%`
-                          : "N/A"}
+                        {isLoading ? "--" : reactionAvgAccuracy != null ? `${Math.round(reactionAvgAccuracy * 100)}%` : "N/A"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Avg Accuracy</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Stroop */}
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-violet-500/10">
+                  <Layers className="h-7 w-7 text-violet-500" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Stroop Test Stats</p>
+                  <div className="mt-2 flex gap-4">
+                    <div>
+                      <p className="text-lg font-bold text-foreground">{isLoading ? "--" : stroopTotal}</p>
+                      <p className="text-xs text-muted-foreground">Tests</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">
+                        {isLoading ? "--" : stroopBestScore != null ? `${stroopBestScore}%` : "N/A"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Best Score</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">
+                        {isLoading ? "--" : stroopAvgAccuracy != null ? `${Math.round(stroopAvgAccuracy * 100)}%` : "N/A"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Avg Accuracy</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Trail Making */}
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500/10">
+                  <Route className="h-7 w-7 text-emerald-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Trail Making Stats</p>
+                  <div className="mt-2 flex gap-4">
+                    <div>
+                      <p className="text-lg font-bold text-foreground">{isLoading ? "--" : trailTotal}</p>
+                      <p className="text-xs text-muted-foreground">Tests</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">
+                        {isLoading ? "--" : trailBestTime != null ? formatDuration(trailBestTime) : "N/A"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Best Time</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">
+                        {isLoading ? "--" : trailAvgAccuracy != null ? `${Math.round(trailAvgAccuracy * 100)}%` : "N/A"}
                       </p>
                       <p className="text-xs text-muted-foreground">Avg Accuracy</p>
                     </div>

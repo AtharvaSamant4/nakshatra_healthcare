@@ -28,7 +28,7 @@ export default function DoctorPatientMessagesPage({
 
   useEffect(() => {
     if (role !== "doctor") {
-      router.replace("/")
+      router.replace("/login")
       return
     }
   }, [role, router])

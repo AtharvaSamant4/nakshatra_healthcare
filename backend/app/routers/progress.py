@@ -23,3 +23,7 @@ def get_exercise_trend(
         days=days,
         exercise_id=str(exercise_id) if exercise_id else None,
     )
+
+@router.get("/{user_id}/improvement")
+def get_improvement(user_id: UUID):
+    return progress_service.get_improvement(str(user_id))

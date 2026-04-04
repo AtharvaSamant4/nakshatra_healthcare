@@ -152,9 +152,17 @@ export function ReactionGame({ onComplete }: ReactionGameProps) {
         {gameState === "complete" ? (
           <div className="flex flex-col items-center justify-center py-8">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent/10">
-              <Trophy className="h-8 w-8 text-accent" />
-            </div>
-            <h3 className="text-xl font-bold text-foreground">Great Job!</h3>
+                {avgTime < 500 ? (
+                  <Trophy className="h-8 w-8 text-accent" />
+                ) : avgTime < 1000 ? (
+                  <div className="h-8 w-8 text-accent">👍</div>
+                ) : (
+                  <div className="h-8 w-8 text-accent">📈</div>
+                )}
+              </div>
+              <h3 className="text-xl font-bold text-foreground">
+                {avgTime < 350 ? "Lightning Fast!" : avgTime < 600 ? "Great Job!" : avgTime < 1500 ? "Good Effort!" : "Keep Practicing!"}
+              </h3>
             <p className="mt-2 text-muted-foreground">
               Average reaction time: {avgTime}ms
             </p>

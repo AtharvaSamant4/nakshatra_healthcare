@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -14,11 +14,15 @@ import {
   progressApi,
   sessionsApi,
   prescriptionsApi,
+  aiApi,
   type ProgressResponse,
   type SessionListItem,
   type Prescription,
+  type RecommendationJson,
 } from "@/lib/api"
-import { Calendar, Dumbbell, Flame, Target, ClipboardList } from "lucide-react"
+import { Calendar, Dumbbell, Flame, Target, ClipboardList, Timer } from "lucide-react"
+import { PatientChat } from "@/components/ai/patient-chat"
+import { AIRecommendation } from "@/components/dashboard/ai-recommendation"
 
 export default function PatientDashboard() {
   const { selectedUserId, identity, role } = useApp()
@@ -27,11 +31,17 @@ export default function PatientDashboard() {
   const [progress, setProgress] = useState<ProgressResponse | null>(null)
   const [recentSessions, setRecentSessions] = useState<SessionListItem[]>([])
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
+  const [recommendation, setRecommendation] = useState<RecommendationJson | null>(null)
+  const [recoveryDays, setRecoveryDays] = useState<{ estimated_days: number | null; confidence: string } | null>(null)
+  const [adaptivePlan, setAdaptivePlan] = useState<{ reps: number; sets: number; intensity: string; reason: string; } | null>(null)
+  const [riskAssessment, setRiskAssessment] = useState<{ risk_level: string; reasons: string[] } | null>(null)
+  const [recoveryScore, setRecoveryScore] = useState<number | null>(null)
+  const [improvement, setImprovement] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (role !== "patient") {
-      router.replace("/")
+      router.replace("/login")
       return
     }
     if (!selectedUserId) return
@@ -41,11 +51,35 @@ export default function PatientDashboard() {
       progressApi.get(selectedUserId),
       sessionsApi.list(selectedUserId, 5),
       prescriptionsApi.list(selectedUserId).catch(() => [] as Prescription[]),
+      aiApi.listRecommendations(selectedUserId).catch(() => []),
+      aiApi.recoveryPrediction(selectedUserId).catch(() => null),
+      aiApi.adaptivePlan(selectedUserId).catch(() => null),
+      aiApi.calculateRisk(selectedUserId).catch(() => null),
+      aiApi.recoveryScore(selectedUserId).catch(() => null),
+      progressApi.improvement(selectedUserId).catch(() => null),
     ])
-      .then(([prog, sessions, rx]) => {
+      .then(async ([prog, sessions, rx, recs, recovery, adaptive, risk, recScore, impData]) => {
         setProgress(prog)
         setRecentSessions(sessions.sessions)
         setPrescriptions(rx.filter((p) => p.status === "active"))
+
+        if (recs.length > 0) {
+          setRecommendation(recs[0].recommendation)
+        } else {
+          // No recommendation exists yet — auto-generate one silently
+          try {
+            const generated = await aiApi.recommendPlan(selectedUserId)
+            if (generated?.recommendation) setRecommendation(generated.recommendation)
+          } catch {
+            // Silently ignore — component shows fallback message
+          }
+        }
+
+        if (recovery) setRecoveryDays({ estimated_days: recovery.estimated_days, confidence: recovery.confidence })
+        if (adaptive) setAdaptivePlan(adaptive)
+        if (risk) setRiskAssessment(risk)
+        if (recScore) setRecoveryScore(recScore.recovery_score)
+        if (impData) setImprovement(impData.improvement)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -63,8 +97,14 @@ export default function PatientDashboard() {
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                      <StatsCard
+              title="Recovery Score"
+              value={loading ? "—" : recoveryScore != null ? `${recoveryScore}/100` : "N/A"}
+              description={improvement != null ? `${improvement > 0 ? "+" : ""}${improvement}% improvement from last week` : "Overall rating"}
+              icon={Target}
+            />
+<StatsCard
             title="Total Sessions"
             value={loading ? "—" : String(progress?.summary.total_exercise_sessions ?? 0)}
             description="Exercise sessions"
@@ -94,7 +134,81 @@ export default function PatientDashboard() {
             description="Last sessions"
             icon={Target}
           />
+          <StatsCard
+            title="Estimated recovery"
+            value={
+              loading
+                ? "—"
+                : recoveryDays?.estimated_days != null
+                ? `${recoveryDays.estimated_days} days`
+                : "N/A"
+            }
+            description={
+              recoveryDays?.confidence
+                ? `${recoveryDays.confidence} confidence`
+                : "Need more sessions"
+            }
+            icon={Timer}
+          />
         </div>
+
+          {/* Risk Assessment */}
+          {riskAssessment && riskAssessment.risk_level === 'high' && (
+            <Card className="border-red-500/50 shadow-sm mt-6 mb-6 bg-red-50/50 dark:bg-red-950/20">
+              <CardHeader>
+                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <span className="text-xl"></span>
+                  <CardTitle className="text-lg">High Risk</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="list-disc pl-5 space-y-1 text-red-800 dark:text-red-200">
+                  {riskAssessment.reasons.map((reason, i) => (
+                    <li key={i}>{reason}</li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI Adaptive Plan */}
+          {adaptivePlan && (
+            <Card className="border-primary/50 shadow-sm mt-6 mb-6">
+              <CardHeader className="bg-primary/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Flame className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-lg">AI Adaptive Plan</CardTitle>
+                  </div>
+                  <Badge variant="default">Auto-adjusted</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <p className="text-sm font-medium text-primary mb-4">
+                  AI adjusted your plan based on performance
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground mb-1">Sets &amp; Reps</p>
+                    <p className="font-bold text-foreground text-lg">{adaptivePlan.sets} &times; {adaptivePlan.reps}</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground mb-1">Intensity</p>
+                    <p className="font-bold text-foreground text-lg capitalize">{adaptivePlan.intensity}</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-muted/30 p-3 sm:col-span-2">
+                    <p className="text-xs text-muted-foreground mb-1">Reasoning</p>
+                    <p className="font-medium text-foreground text-sm">{adaptivePlan.reason}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+
+
+
+
 
         {/* Active Prescriptions */}
         {prescriptions.length > 0 && (
@@ -154,8 +268,25 @@ export default function PatientDashboard() {
           </div>
         </div>
 
+        <AIRecommendation
+          recommendation={recommendation}
+          loading={loading}
+          patientId={selectedUserId ?? undefined}
+          onRefresh={(rec) => setRecommendation(rec)}
+        />
+
         <RecentSessions sessions={recentSessions} loading={loading} />
+
+        {/* AI Therapist Chat */}
+        {selectedUserId && (
+          <PatientChat patientId={selectedUserId} />
+        )}
       </div>
     </AppLayout>
   )
 }
+
+
+
+
+

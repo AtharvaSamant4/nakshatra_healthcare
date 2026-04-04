@@ -17,6 +17,7 @@ class PatientUpdate(BaseModel):
     diagnosis: Optional[str] = None
     injury_type: Optional[str] = None
     severity: Optional[str] = None
+    has_alert: bool = False
     status: Optional[str] = None
     condition_notes: Optional[str] = None
     doctor_id: Optional[str] = None
@@ -39,6 +40,7 @@ class PatientListItem(BaseModel):
     doctor_id: Optional[str] = None
     injury_type: Optional[str] = None
     severity: Optional[str] = None
+    has_alert: bool = False
 
 
 class PatientResponse(BaseModel):
@@ -53,5 +55,6 @@ class PatientResponse(BaseModel):
     diagnosis: Optional[str] = None
     injury_type: Optional[str] = None
     severity: Optional[str] = None
+    has_alert: bool = False
     emergency: Optional[bool] = None
     created_at: datetime

@@ -101,7 +101,7 @@ export interface SessionListResponse {
 
 export interface CreateGameSessionPayload {
   user_id: string
-  game_type: "memory" | "reaction" | "pattern"
+  game_type: "memory" | "reaction" | "pattern" | "stroop" | "trail_making"
   score: number
   accuracy?: number
   avg_reaction_ms?: number
@@ -251,6 +251,7 @@ export interface PatientListItem {
   doctor_id?: string
   injury_type?: string
   severity?: string
+  has_alert?: boolean
 }
 
 export interface PatientCreateResponse {
@@ -393,6 +394,7 @@ export const feedbackApi = {
 // ─── Progress ─────────────────────────────────────────────────────────────────
 
 export const progressApi = {
+  improvement: (user_id: string) => request<{improvement: number}>(`/api/progress/${user_id}/improvement`),
   get: (user_id: string) =>
     request<ProgressResponse>(`/api/progress/${user_id}`),
   trend: (user_id: string, days = 30, exercise_id?: string) => {
@@ -483,4 +485,147 @@ export const messagesApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+}
+
+// ─── AI Features ──────────────────────────────────────────────────────────────
+
+export interface AIChatMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
+export interface ReportJson {
+  summary: string
+  progress_trend: "improving" | "stable" | "declining"
+  key_issues: string[]
+  risk_level: "low" | "medium" | "high"
+  recommendations: string[]
+  next_plan: string
+  // Weekly report fields (optional — only present on auto-generated weekly reports)
+  improvement?: number
+  consistency?: number
+  form_analysis?: string
+  cognitive_analysis?: string
+  composite_score?: number
+  doctor_attention?: boolean
+}
+
+export interface PatientReport {
+  id?: string
+  patient_id: string
+  report: ReportJson
+  created_at?: string
+}
+
+export interface WeeklyReportJson {
+  summary: string
+  improvement: number
+  consistency: number
+  form_analysis: string
+  cognitive_analysis: string
+  risk_level: "low" | "medium" | "high"
+  recommendations: string[]
+  doctor_attention: boolean
+  composite_score?: number
+}
+
+export interface RecommendedExercise {
+  name: string
+  sets: number
+  reps: number
+  reason: string
+}
+
+export interface RecommendationJson {
+  recommended_exercises: RecommendedExercise[]
+  intensity: "increase" | "maintain" | "decrease"
+  warnings: string[]
+  reasoning: string
+  composite_score: number
+}
+
+export interface PatientRecommendation {
+  id?: string
+  patient_id: string
+  recommendation: RecommendationJson
+  created_at?: string
+}
+
+export const aiApi = {
+  recoveryScore: (patient_id: string) =>
+    request<{ recovery_score: number; }>("/api/ai/recovery-score", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+  calculateRisk: (patient_id: string) =>
+    request<{ risk_level: string; reasons: string[]; }>("/api/ai/calculate-risk", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+  adaptivePlan: (patient_id: string) =>
+    request<{ reps: number; sets: number; intensity: string; reason: string; }>("/api/ai/adaptive-plan", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+  patientChat: (patient_id: string, message: string) =>
+    request<{ response: string }>("/api/ai/patient-chat", {
+      method: "POST",
+      body: JSON.stringify({ patient_id, message }),
+    }),
+
+  generateReport: (patient_id: string) =>
+    request<PatientReport>("/api/ai/generate-report", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+
+  listReports: (patient_id: string) =>
+    request<PatientReport[]>(`/api/ai/reports/${patient_id}`),
+
+  doctorChat: (doctor_id: string, patient_id: string, message: string) =>
+    request<{ response: string }>("/api/ai/doctor-chat", {
+      method: "POST",
+      body: JSON.stringify({ doctor_id, patient_id, message }),
+    }),
+
+  generateWeeklyReport: (patient_id: string) =>
+    request<PatientReport>("/api/ai/generate-weekly-report", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+
+  recommendPlan: (patient_id: string) =>
+    request<PatientRecommendation>("/api/ai/recommend-plan", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+
+  listRecommendations: (patient_id: string) =>
+    request<PatientRecommendation[]>(`/api/ai/recommendations/${patient_id}`),
+
+  seedDemo: (patient_id: string) =>
+    request<{ status: string; exercise_sessions_seeded: number; game_sessions_seeded: number; report_generated: boolean; recommendation_generated: boolean }>(
+      "/api/ai/seed-demo",
+      { method: "POST", body: JSON.stringify({ patient_id }) }
+    ),
+
+  recoveryPrediction: (patient_id: string) =>
+    request<{
+      estimated_days: number | null
+      confidence: "low" | "medium" | "high"
+      initial_rom: number | null
+      latest_rom: number | null
+      target_rom: number
+      progress_rate_per_day: number | null
+    }>("/api/ai/recovery-prediction", {
+      method: "POST",
+      body: JSON.stringify({ patient_id }),
+    }),
+}
+
+export const authApi = {
+  login: (data: any) => request<any>("/auth/login", { 
+    method: "POST", 
+    body: JSON.stringify(data) 
+  }),
 }

@@ -150,23 +150,25 @@ export function MemoryGame({ onComplete }: MemoryGameProps) {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-3">
-            {cards.map((card) => (
-              <button
-                key={card.id}
-                onClick={() => handleCardClick(card.id)}
-                disabled={card.isFlipped || card.isMatched}
-                className={cn(
-                  "aspect-square rounded-xl text-2xl font-bold transition-all duration-300",
-                  card.isFlipped || card.isMatched
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted hover:bg-muted/80",
-                  card.isMatched && "bg-accent text-accent-foreground"
-                )}
-              >
-                {card.isFlipped || card.isMatched ? card.symbol : "?"}
-              </button>
-            ))}
+          <div className="mx-auto max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg">
+            <div className="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
+              {cards.map((card) => (
+                <button
+                  key={card.id}
+                  onClick={() => handleCardClick(card.id)}
+                  disabled={card.isFlipped || card.isMatched}
+                  className={cn(
+                    "aspect-square rounded-xl text-lg sm:text-xl md:text-2xl font-bold transition-all duration-300",
+                    card.isFlipped || card.isMatched
+                      ? "bg-primary text-primary-foreground shadow-md"
+                      : "bg-muted hover:bg-muted/80 shadow-sm",
+                    card.isMatched && "bg-accent text-accent-foreground"
+                  )}
+                >
+                  {card.isFlipped || card.isMatched ? card.symbol : "?"}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </CardContent>

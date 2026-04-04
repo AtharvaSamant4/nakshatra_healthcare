@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { MemoryGame } from "@/components/games/memory-game"
 import { ReactionGame } from "@/components/games/reaction-game"
@@ -8,7 +8,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { gameSessionsApi, type GameSessionListItem } from "@/lib/api"
 import { useUser } from "@/lib/user-context"
-import { Brain, Zap, Trophy, Clock, Gamepad2 } from "lucide-react"
+import { Brain, Zap, Trophy, Clock, Gamepad2, Layers, RotateCcw, CheckCircle, XCircle, Route } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface GameScore {
   type: "memory" | "reaction"
@@ -209,14 +210,25 @@ export default function GamesPage() {
 
         {/* Games Tabs */}
         <Tabs defaultValue="memory" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-grid">
-            <TabsTrigger value="memory" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="memory" className="flex items-center gap-1.5 text-xs sm:text-sm">
               <Brain className="h-4 w-4" />
-              Memory Game
+              <span className="hidden sm:inline">Memory</span>
+              <span className="sm:hidden">Mem</span>
             </TabsTrigger>
-            <TabsTrigger value="reaction" className="flex items-center gap-2">
+            <TabsTrigger value="reaction" className="flex items-center gap-1.5 text-xs sm:text-sm">
               <Zap className="h-4 w-4" />
-              Reaction Game
+              <span className="hidden sm:inline">Reaction</span>
+              <span className="sm:hidden">React</span>
+            </TabsTrigger>
+            <TabsTrigger value="stroop" className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <Layers className="h-4 w-4" />
+              <span>Stroop</span>
+            </TabsTrigger>
+            <TabsTrigger value="trail" className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <Route className="h-4 w-4" />
+              <span className="hidden sm:inline">Trail Making</span>
+              <span className="sm:hidden">Trail</span>
             </TabsTrigger>
           </TabsList>
 
@@ -226,6 +238,14 @@ export default function GamesPage() {
 
           <TabsContent value="reaction">
             <ReactionGame onComplete={handleReactionComplete} />
+          </TabsContent>
+
+          <TabsContent value="stroop">
+            <StroopGameEmbed selectedUserId={selectedUserId} />
+          </TabsContent>
+
+          <TabsContent value="trail">
+            <TrailMakingEmbed selectedUserId={selectedUserId} />
           </TabsContent>
         </Tabs>
 
@@ -249,5 +269,472 @@ export default function GamesPage() {
         </Card>
       </div>
     </AppLayout>
+  )
+}
+
+// ─── Stroop Game (inline, no redirect) ────────────────────────────────────────
+
+const STROOP_COLORS = ["RED", "BLUE", "GREEN", "YELLOW"] as const
+type SC = typeof STROOP_COLORS[number]
+const SC_TEXT: Record<SC, string>   = { RED: "text-red-500", BLUE: "text-blue-500", GREEN: "text-green-500", YELLOW: "text-yellow-400" }
+const SC_BTN:  Record<SC, string>   = { RED: "bg-red-500 hover:bg-red-600", BLUE: "bg-blue-500 hover:bg-blue-600", GREEN: "bg-green-500 hover:bg-green-600", YELLOW: "bg-yellow-400 hover:bg-yellow-500" }
+const TOTAL = 10
+
+function shuffle<T>(a: T[]): T[] { return [...a].sort(() => Math.random() - 0.5) }
+function rnd<T>(a: readonly T[]): T { return a[Math.floor(Math.random() * a.length)] }
+function mkRound() {
+  const color = rnd(STROOP_COLORS)
+  const word  = Math.random() < 0.7 ? rnd(STROOP_COLORS.filter(c => c !== color)) : color
+  return { word, color, opts: shuffle([...STROOP_COLORS]) }
+}
+
+function StroopGameEmbed({ selectedUserId }: { selectedUserId: string | null }) {
+  const [phase, setPhase]         = useState<"intro"|"playing"|"feedback"|"results">("intro")
+  const [idx,   setIdx]           = useState(0)
+  const [round, setRound]         = useState(mkRound)
+  const [results, setResults]     = useState<{ok:boolean; rt:number}[]>([])
+  const [last,  setLast]          = useState<boolean|null>(null)
+  const [tLeft, setTLeft]         = useState(3000)
+  const [saving, setSaving]       = useState(false)
+  const startRef  = useRef<number>(0)
+  const timerRef  = useRef<ReturnType<typeof setInterval>|null>(null)
+  const doneRef   = useRef(false)
+
+  const clearT = useCallback(() => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }, [])
+  useEffect(() => () => clearT(), [clearT])
+
+  const record = useCallback((ok: boolean, rt: number) => {
+    if (doneRef.current) return
+    doneRef.current = true
+    clearT()
+    setLast(ok)
+    setPhase("feedback")
+    setResults(prev => {
+      const next = [...prev, { ok, rt }]
+      setTimeout(() => {
+        if (idx + 1 >= TOTAL) {
+          setPhase("results")
+          saveStroop(next)
+        } else {
+          setIdx(i => i + 1)
+          setRound(mkRound())
+          setLast(null)
+          setPhase("playing")
+        }
+      }, 500)
+      return next
+    })
+  }, [idx, clearT]) // eslint-disable-line
+
+  useEffect(() => {
+    if (phase !== "playing") return
+    setTLeft(3000)
+    startRef.current = Date.now()
+    doneRef.current  = false
+    timerRef.current = setInterval(() => {
+      setTLeft(p => {
+        if (p <= 100) { clearT(); record(false, -1); return 0 }
+        return p - 100
+      })
+    }, 100)
+  }, [phase, idx]) // eslint-disable-line
+
+  async function saveStroop(res: {ok:boolean;rt:number}[]) {
+    if (!selectedUserId) return
+    setSaving(true)
+    const correct = res.filter(r => r.ok).length
+    const validRT = res.filter(r => r.rt > 0).map(r => r.rt)
+    const avgRT   = validRT.length ? Math.round(validRT.reduce((a,b)=>a+b,0)/validRT.length) : 0
+    try {
+      await gameSessionsApi.create({
+        user_id: selectedUserId, game_type: "stroop",
+        score: Math.round(correct/TOTAL*100), accuracy: correct/TOTAL,
+        avg_reaction_ms: avgRT, duration_seconds: 30,
+        game_metadata: { correct, wrong: TOTAL-correct, interference: parseFloat(((TOTAL-correct)/TOTAL).toFixed(3)), avg_reaction_ms: avgRT },
+      })
+    } catch(e) { console.error(e) } finally { setSaving(false) }
+  }
+
+  function startGame() { setResults([]); setIdx(0); setRound(mkRound()); setLast(null); setPhase("playing") }
+
+  const correct = results.filter(r=>r.ok).length
+  const accuracy = results.length ? correct/results.length : 0
+  const validRT  = results.filter(r=>r.rt>0).map(r=>r.rt)
+  const avgRT    = validRT.length ? Math.round(validRT.reduce((a,b)=>a+b,0)/validRT.length) : 0
+  const interf   = results.length ? (results.length-correct)/results.length : 0
+  const insight  = interf > 0.4 ? "High cognitive interference detected. Practice focus exercises." : accuracy > 0.8 ? "Strong cognitive control. Excellent inhibition ability." : "Moderate attention performance. Consistent training will help."
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+
+        {/* INTRO */}
+        {phase === "intro" && (
+          <div className="flex flex-col items-center gap-5 text-center py-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+              <Layers className="h-7 w-7 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-foreground">Stroop Cognitive Test</h3>
+              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                Click the <strong>ink colour</strong> of the word — not the word itself. 10 rounds, 3 seconds each.
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted px-6 py-4">
+              <p className="text-xs text-muted-foreground mb-2">Example — answer is <strong>BLUE</strong></p>
+              <p className="text-5xl font-black text-blue-500">RED</p>
+            </div>
+            <button onClick={startGame} className="px-10 py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors">
+              Start Test
+            </button>
+          </div>
+        )}
+
+        {/* PLAYING / FEEDBACK */}
+        {(phase === "playing" || phase === "feedback") && (
+          <div className="flex flex-col items-center gap-5">
+            {/* Progress */}
+            <div className="w-full space-y-1.5">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Round {idx+1} / {TOTAL}</span>
+                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{(tLeft/1000).toFixed(1)}s</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className={cn("h-full rounded-full transition-all", tLeft>1500?"bg-green-500":tLeft>800?"bg-yellow-400":"bg-red-500")}
+                  style={{width:`${(tLeft/3000)*100}%`}} />
+              </div>
+              <div className="flex gap-1">
+                {Array.from({length:TOTAL}).map((_,i) => (
+                  <div key={i} className={cn("flex-1 h-1.5 rounded-full",
+                    i<idx ? (results[i]?.ok?"bg-green-500":"bg-red-400") : i===idx?"bg-primary":"bg-muted")} />
+                ))}
+              </div>
+            </div>
+
+            {/* Stimulus */}
+            <div className={cn("w-full rounded-2xl border-2 py-12 flex flex-col items-center gap-3 transition-all",
+              phase==="feedback" && last===true  ? "border-green-500 bg-green-50" :
+              phase==="feedback" && last===false ? "border-red-500 bg-red-50" : "border-border bg-muted/20")}>
+              {phase === "feedback"
+                ? last
+                  ? <><CheckCircle className="h-12 w-12 text-green-500" /><p className="text-lg font-bold text-green-600">Correct!</p></>
+                  : <><XCircle className="h-12 w-12 text-red-500" /><p className="text-lg font-bold text-red-600">Wrong!</p>
+                     <p className="text-sm text-muted-foreground">Ink was <span className={cn("font-bold",SC_TEXT[round.color])}>{round.color}</span></p></>
+                : <>
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">What colour is the ink?</p>
+                    <p className={cn("text-7xl font-black select-none", SC_TEXT[round.color])}>{round.word}</p>
+                  </>
+              }
+            </div>
+
+            {/* Buttons */}
+            <div className="grid grid-cols-2 gap-3 w-full">
+              {round.opts.map(opt => (
+                <button key={opt} disabled={phase==="feedback"}
+                  onClick={() => { if (phase==="playing" && !doneRef.current) record(opt===round.color, Date.now()-startRef.current) }}
+                  className={cn("h-14 rounded-xl text-base font-bold text-white transition-all active:scale-95 disabled:opacity-50", SC_BTN[opt])}>
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RESULTS */}
+        {phase === "results" && (
+          <div className="flex flex-col items-center gap-5">
+            <div className="text-center">
+              <h3 className="text-xl font-bold text-foreground">Test Complete</h3>
+              <p className="text-sm text-muted-foreground">Stroop Cognitive Assessment</p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 w-full">
+              {[
+                {label:"Accuracy",     val:`${Math.round(accuracy*100)}%`, sub:`${correct}/${TOTAL} correct`},
+                {label:"Avg Reaction", val:avgRT>0?`${avgRT}ms`:"—",        sub:"response time"},
+                {label:"Interference", val:`${Math.round(interf*100)}%`,    sub:"error rate"},
+              ].map(({label,val,sub}) => (
+                <div key={label} className="rounded-xl bg-muted/50 border p-3 text-center">
+                  <p className="text-2xl font-black text-primary">{val}</p>
+                  <p className="text-xs font-semibold text-foreground mt-0.5">{label}</p>
+                  <p className="text-xs text-muted-foreground">{sub}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Round dots */}
+            <div className="flex gap-1.5 w-full">
+              {results.map((r,i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <div className={cn("w-full h-7 rounded-md flex items-center justify-center text-xs font-bold text-white", r.ok?"bg-green-500":"bg-red-400")}>
+                    {r.ok?"✓":"✗"}
+                  </div>
+                  <span className="text-[9px] text-muted-foreground">{r.rt>0?r.rt:"–"}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Insight */}
+            <div className={cn("w-full rounded-xl border-l-4 p-4 flex items-start gap-3",
+              interf>0.4?"border-l-yellow-400 bg-yellow-50":accuracy>0.8?"border-l-green-500 bg-green-50":"border-l-blue-400 bg-blue-50")}>
+              <Brain className={cn("h-5 w-5 mt-0.5 shrink-0", interf>0.4?"text-yellow-600":accuracy>0.8?"text-green-600":"text-blue-600")} />
+              <div>
+                <p className="text-sm font-semibold text-foreground mb-0.5">AI Interpretation</p>
+                <p className="text-sm text-muted-foreground">{insight}</p>
+              </div>
+            </div>
+
+            {saving && <p className="text-xs text-muted-foreground">Saving results…</p>}
+
+            <button onClick={startGame} className="flex items-center gap-2 px-8 py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors">
+              <RotateCcw className="h-4 w-4" /> Try Again
+            </button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Trail Making Embed ───────────────────────────────────────────────────────
+
+const TMT_NODE_R = 26
+const TMT_MIN_DIST = 14
+const TMT_ERROR_FLASH = 600
+
+function buildTmtSequence(mode: "A" | "B"): string[] {
+  if (mode === "A") return Array.from({ length: 8 }, (_, i) => String(i + 1))
+  const nums = ["1","2","3","4","5"]
+  const lets = ["A","B","C","D","E"]
+  const seq: string[] = []
+  for (let i = 0; i < 5; i++) { seq.push(nums[i]); seq.push(lets[i]) }
+  return seq
+}
+
+function placeTmtNodes(seq: string[], w: number, h: number) {
+  const nodes: { id: string; x: number; y: number; order: number }[] = []
+  const pad = 8
+  const minD = TMT_MIN_DIST * Math.min(w, h) / 100
+  for (let i = 0; i < seq.length; i++) {
+    let x = 0, y = 0, att = 0
+    do {
+      x = pad + Math.random() * (100 - pad * 2)
+      y = pad + Math.random() * (100 - pad * 2)
+      const px = x / 100 * w, py = y / 100 * h
+      if (nodes.every(n => Math.hypot(n.x/100*w - px, n.y/100*h - py) >= minD)) break
+    } while (++att < 500)
+    nodes.push({ id: seq[i], x, y, order: i })
+  }
+  return nodes
+}
+
+function TrailMakingEmbed({ selectedUserId }: { selectedUserId: string | null }) {
+  type TmtNode = { id: string; x: number; y: number; order: number }
+  type TmtConn = { from: TmtNode; to: TmtNode }
+  type TmtPhase = "intro" | "playing" | "results"
+
+  const [tmtPhase, setTmtPhase] = useState<TmtPhase>("intro")
+  const [tmtMode, setTmtMode]   = useState<"A"|"B">("A")
+  const [tmtNodes, setTmtNodes] = useState<TmtNode[]>([])
+  const [tmtConns, setTmtConns] = useState<TmtConn[]>([])
+  const [nextOrd,  setNextOrd]  = useState(0)
+  const [flash,    setFlash]    = useState<{id:string; ok:boolean} | null>(null)
+  const [elapsed,  setElapsed]  = useState(0)
+  const [tmtErrors,setTmtErrors]= useState(0)
+  const [totalClk, setTotalClk] = useState(0)
+  const [saving,   setSaving]   = useState(false)
+
+  const canvasRef   = useRef<HTMLDivElement>(null)
+  const startTRef   = useRef<number | null>(null)
+  const tmtTimer    = useRef<ReturnType<typeof setInterval> | null>(null)
+  const savedRef    = useRef(false)
+
+  function startTmt(mode: "A"|"B") {
+    setTmtMode(mode)
+    const seq = buildTmtSequence(mode)
+    const w = canvasRef.current?.clientWidth ?? 600
+    const h = canvasRef.current?.clientHeight ?? 380
+    setTmtNodes(placeTmtNodes(seq, w, h))
+    setTmtConns([]); setNextOrd(0); setElapsed(0); setTmtErrors(0); setTotalClk(0); setFlash(null)
+    startTRef.current = null; savedRef.current = false
+    setTmtPhase("playing")
+  }
+
+  useEffect(() => {
+    if (tmtPhase !== "playing") { if (tmtTimer.current) clearInterval(tmtTimer.current); return }
+    tmtTimer.current = setInterval(() => {
+      if (startTRef.current !== null) setElapsed(Date.now() - startTRef.current)
+    }, 100)
+    return () => { if (tmtTimer.current) clearInterval(tmtTimer.current) }
+  }, [tmtPhase])
+
+  function handleTmtClick(node: TmtNode) {
+    if (tmtPhase !== "playing") return
+    if (startTRef.current === null) startTRef.current = Date.now()
+    setTotalClk(c => c + 1)
+    const ok = node.order === nextOrd
+    if (ok) {
+      setFlash({ id: node.id, ok: true })
+      if (nextOrd > 0) setTmtConns(prev => [...prev, { from: tmtNodes[nextOrd - 1], to: node }])
+      const nn = nextOrd + 1
+      setNextOrd(nn)
+      if (nn >= tmtNodes.length) {
+        if (tmtTimer.current) clearInterval(tmtTimer.current)
+        const ft = Date.now() - (startTRef.current ?? Date.now())
+        setElapsed(ft)
+        setTimeout(() => setTmtPhase("results"), 400)
+      }
+    } else {
+      setTmtErrors(e => e + 1)
+      setFlash({ id: node.id, ok: false })
+    }
+    setTimeout(() => setFlash(null), TMT_ERROR_FLASH)
+  }
+
+  useEffect(() => {
+    if (tmtPhase !== "results" || savedRef.current || !selectedUserId) return
+    savedRef.current = true
+    const acc = totalClk > 0 ? tmtNodes.length / totalClk : 1
+    setSaving(true)
+    gameSessionsApi.create({
+      user_id: selectedUserId,
+      game_type: "trail_making" as never,
+      score: Math.round(acc * 100),
+      accuracy: acc,
+      duration_seconds: Math.round(elapsed / 1000),
+      game_metadata: { mode: tmtMode, completion_time_ms: elapsed, total_errors: tmtErrors, accuracy: acc },
+    }).catch(console.error).finally(() => setSaving(false))
+  }, [tmtPhase]) // eslint-disable-line
+
+  const fmtT = (ms: number) => { const s = Math.floor(ms/1000); const m = Math.floor(s/60); return m > 0 ? `${m}m ${s%60}s` : `${s}.${String(ms%1000).slice(0,1)}s` }
+  const tmtAcc = totalClk > 0 ? Math.round(tmtNodes.length / totalClk * 100) : 100
+  const threshold = tmtMode === "A" ? 30000 : 60000
+  const tmtInsight = tmtErrors > 5 ? "Low cognitive flexibility detected. Try practising sequencing tasks daily."
+    : elapsed < threshold ? "Excellent processing speed! Your sequencing ability is above average."
+    : "Moderate performance. Consistent training will improve your processing speed."
+
+  function nodeStyle(n: TmtNode) {
+    if (flash?.id === n.id) return flash.ok ? "bg-green-500 border-green-600 text-white scale-110" : "bg-red-500 border-red-600 text-white scale-110"
+    if (n.order < nextOrd) return "bg-primary/20 border-primary text-primary"
+    if (n.order === nextOrd) return "bg-background border-primary text-foreground ring-2 ring-primary ring-offset-1"
+    return "bg-muted/60 border-border text-muted-foreground"
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+
+        {/* INTRO */}
+        {tmtPhase === "intro" && (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-3 text-center pb-2">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                <Route className="h-7 w-7 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-foreground">Trail Making Test</h3>
+                <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                  Click nodes in the correct sequence as fast as possible. Tests cognitive sequencing &amp; processing speed.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(["A","B"] as const).map(m => (
+                <button key={m} onClick={() => startTmt(m)}
+                  className="flex flex-col items-start gap-2 rounded-xl border-2 border-border hover:border-primary/60 bg-muted/30 hover:bg-primary/5 p-4 text-left transition-all">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-foreground text-base">Mode {m}</span>
+                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", m === "A" ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary")}>
+                      {m === "A" ? "Basic" : "Advanced"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {m === "A" ? "Numbers only: 1 → 2 → 3 → 4 …" : "Alternating: 1 → A → 2 → B → 3 → C …"}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* PLAYING */}
+        {tmtPhase === "playing" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Next: <span className="font-bold text-foreground">{tmtNodes[nextOrd]?.id ?? "✓"}</span></span>
+              <span className={cn("font-semibold", tmtErrors > 0 ? "text-red-500" : "text-foreground")}>Errors: {tmtErrors}</span>
+              <span className="font-mono text-muted-foreground">{fmtT(elapsed)}</span>
+              <button onClick={() => setTmtPhase("intro")} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                <RotateCcw className="h-3 w-3" /> Quit
+              </button>
+            </div>
+            {/* Progress */}
+            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+              <div className="h-full bg-primary transition-all duration-300" style={{ width: `${tmtNodes.length > 0 ? nextOrd/tmtNodes.length*100 : 0}%` }} />
+            </div>
+            {/* Canvas */}
+            <div ref={canvasRef} className="relative w-full rounded-xl border border-border bg-muted/10 select-none" style={{ height: 380 }}>
+              <svg className="pointer-events-none absolute inset-0 w-full h-full" style={{ zIndex: 1 }}>
+                {tmtConns.map((c, i) => (
+                  <line key={i} x1={`${c.from.x}%`} y1={`${c.from.y}%`} x2={`${c.to.x}%`} y2={`${c.to.y}%`}
+                    stroke="hsl(var(--primary))" strokeWidth={2.5} strokeLinecap="round" opacity={0.65} />
+                ))}
+                {nextOrd > 0 && nextOrd < tmtNodes.length && (
+                  <line x1={`${tmtNodes[nextOrd-1].x}%`} y1={`${tmtNodes[nextOrd-1].y}%`}
+                    x2={`${tmtNodes[nextOrd].x}%`} y2={`${tmtNodes[nextOrd].y}%`}
+                    stroke="hsl(var(--primary))" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.3} />
+                )}
+              </svg>
+              {tmtNodes.map(n => (
+                <button key={n.id} onClick={() => handleTmtClick(n)}
+                  style={{ position:"absolute", left:`calc(${n.x}% - ${TMT_NODE_R}px)`, top:`calc(${n.y}% - ${TMT_NODE_R}px)`, width:TMT_NODE_R*2, height:TMT_NODE_R*2, zIndex:2 }}
+                  className={cn("rounded-full border-2 font-bold text-sm flex items-center justify-center transition-all duration-150 focus:outline-none", nodeStyle(n))}>
+                  {n.id}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RESULTS */}
+        {tmtPhase === "results" && (
+          <div className="flex flex-col items-center gap-5 py-2">
+            <div className="grid grid-cols-3 gap-4 w-full">
+              {[
+                { label: "Time", value: fmtT(elapsed), icon: "⏱" },
+                { label: "Errors", value: String(tmtErrors), icon: tmtErrors > 5 ? "⚠" : "✓" },
+                { label: "Accuracy", value: `${tmtAcc}%`, icon: "🎯" },
+              ].map(s => (
+                <div key={s.label} className="flex flex-col items-center gap-1 rounded-xl border border-border bg-muted/30 p-3 text-center">
+                  <span className="text-2xl">{s.icon}</span>
+                  <span className="font-bold text-foreground text-lg">{s.value}</span>
+                  <span className="text-xs text-muted-foreground">{s.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className={cn("w-full rounded-xl border-l-4 p-4 flex items-start gap-3",
+              tmtErrors > 5 ? "border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/20"
+              : elapsed < threshold ? "border-l-green-500 bg-green-50 dark:bg-green-950/20"
+              : "border-l-blue-400 bg-blue-50 dark:bg-blue-950/20")}>
+              <Brain className={cn("h-5 w-5 mt-0.5 shrink-0", tmtErrors > 5 ? "text-yellow-600" : elapsed < threshold ? "text-green-600" : "text-blue-600")} />
+              <div>
+                <p className="text-sm font-semibold text-foreground mb-0.5">AI Insight</p>
+                <p className="text-sm text-muted-foreground">{tmtInsight}</p>
+              </div>
+            </div>
+            {saving && <p className="text-xs text-muted-foreground">Saving results…</p>}
+            <div className="flex gap-3 flex-wrap justify-center">
+              <button onClick={() => startTmt(tmtMode)} className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors text-sm">
+                <RotateCcw className="h-4 w-4" /> Play Again
+              </button>
+              <button onClick={() => startTmt(tmtMode === "A" ? "B" : "A")} className="flex items-center gap-2 px-6 py-2.5 rounded-xl border border-border bg-background font-semibold hover:bg-muted transition-colors text-sm">
+                Try Mode {tmtMode === "A" ? "B" : "A"}
+              </button>
+            </div>
+          </div>
+        )}
+
+      </CardContent>
+    </Card>
   )
 }

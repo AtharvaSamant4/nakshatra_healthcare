@@ -30,7 +30,7 @@ export default function DoctorDashboard() {
 
   useEffect(() => {
     if (role !== "doctor") {
-      router.replace("/")
+      router.replace("/login")
       return
     }
     setLoading(true)
@@ -142,6 +142,11 @@ export default function DoctorDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {patient.has_alert && (
+                        <Badge variant="destructive" className="bg-red-500 hover:bg-red-600">
+                          High Risk Alert
+                        </Badge>
+                      )}
                       <Badge
                         variant="secondary"
                         className={STATUS_COLORS[patient.status ?? ""] ?? "bg-muted text-muted-foreground"}

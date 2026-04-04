@@ -1,7 +1,8 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react"
-import { usersApi, type UserListItem } from "@/lib/api"
+import { usersApi, patientsApi, type UserListItem } from "@/lib/api"
+import { useApp } from "@/lib/app-context"
 
 interface UserContextValue {
   users: UserListItem[]
@@ -25,12 +26,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Try legacy users table; fall back to patients if table doesn't exist
     usersApi.list()
       .then((data) => {
-        setUsers(data)
-        // Auto-select the first user if none chosen yet
-        if (data.length > 0) setSelectedUserId(data[0].id)
+        if (data.length > 0) {
+          setUsers(data)
+          setSelectedUserId(data[0].id)
+        } else {
+          return Promise.reject(new Error("empty"))
+        }
       })
+      .catch(() =>
+        patientsApi.list()
+          .then((pts) => {
+            const mapped: UserListItem[] = pts.map((p) => ({
+              id: p.id,
+              name: p.name,
+              created_at: "",
+            }))
+            setUsers(mapped)
+            if (mapped.length > 0) setSelectedUserId(mapped[0].id)
+          })
+      )
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -44,6 +61,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * useUser — bridges the legacy UserContext with the V2 AppContext.
+ * Exercise and Games pages use this hook. When a patient is logged in via
+ * AppContext (V2 flow), we use that selectedUserId so session saves work.
+ */
 export function useUser() {
-  return useContext(UserContext)
+  const legacy = useContext(UserContext)
+  const app = useApp()
+  // V2 app context has a patient logged in — use that ID
+  if (app.selectedUserId) {
+    return { ...legacy, selectedUserId: app.selectedUserId }
+  }
+  return legacy
 }

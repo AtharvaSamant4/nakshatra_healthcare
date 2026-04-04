@@ -39,7 +39,7 @@ export default function ReceptionPage() {
 
   useEffect(() => {
     if (role !== "receptionist") {
-      router.replace("/")
+      router.replace("/login")
       return
     }
     staffApi.list("doctor")

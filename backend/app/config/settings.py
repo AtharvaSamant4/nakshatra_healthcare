@@ -10,9 +10,11 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
     gemini_api_key: str
+    grok_api_key: str = ""
 
     class Config:
         env_file = str(_ENV_FILE)
+        extra = "allow"
 
 
 @lru_cache()

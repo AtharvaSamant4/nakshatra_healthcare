@@ -66,7 +66,7 @@ export function Navbar() {
 
   function handleSwitchRole() {
     clearSession()
-    router.push("/")
+    router.push("/login")
   }
 
   return (

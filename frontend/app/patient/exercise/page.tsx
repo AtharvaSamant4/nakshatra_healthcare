@@ -37,7 +37,7 @@ export default function PatientExercisePage() {
 
   useEffect(() => {
     if (role !== "patient") {
-      router.replace("/")
+      router.replace("/login")
       return
     }
   }, [role, router])

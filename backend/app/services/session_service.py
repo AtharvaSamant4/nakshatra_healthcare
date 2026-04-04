@@ -1,4 +1,5 @@
 import logging
+import threading
 from fastapi import HTTPException
 from app.db.supabase_client import get_supabase
 from app.models.session_models import (
@@ -125,6 +126,14 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
     )
 
     session_record = insert_response.data[0]
+
+    # Auto-trigger weekly report in a background thread — never blocks or fails the response
+    def _bg_report():
+        from app.services import ai_service  # late import avoids circular at module load
+        ai_service.auto_trigger_weekly_report(payload.user_id)
+
+    threading.Thread(target=_bg_report, daemon=True).start()
+
     return SessionCreateResponse(
         id=session_record["id"],
         user_id=session_record["user_id"],
