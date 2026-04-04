@@ -66,16 +66,10 @@ export default function PatientExercisePage() {
       const activeRx = rx.filter((p) => p.status === "active")
       setPrescriptions(activeRx)
 
-      const prescribedExerciseIds = new Set(
-        activeRx.map((p) => p.exercise_id).filter(Boolean) as string[]
-      )
-      const filtered =
-        prescribedExerciseIds.size > 0
-          ? allExercises.filter((e) => prescribedExerciseIds.has(e.id))
-          : allExercises
-
-      setExercises(filtered)
-      if (filtered.length > 0) setSelectedExerciseId(filtered[0].id)
+      // Always show the full exercise catalog — prescriptions are shown as a
+      // contextual banner when the matching exercise is selected, not as a filter.
+      setExercises(allExercises)
+      if (allExercises.length > 0) setSelectedExerciseId(allExercises[0].id)
     }).catch(console.error)
   }, [selectedUserId])
 
