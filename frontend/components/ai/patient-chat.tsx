@@ -58,6 +58,44 @@ export function PatientChat({ patientId }: PatientChatProps) {
     }
   }
 
+  function renderMarkdown(text: string) {
+    const lines = text.split("\n")
+    const elements: React.ReactNode[] = []
+    let key = 0
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        elements.push(<div key={key++} className="h-2" />)
+        continue
+      }
+
+      if (/^[\*\-]\s+/.test(line)) {
+        const content = line.replace(/^[\*\-]\s+/, "")
+        elements.push(
+          <div key={key++} className="flex gap-2 items-start">
+            <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-50" />
+            <span>{inlineParse(content)}</span>
+          </div>
+        )
+        continue
+      }
+
+      elements.push(<p key={key++}>{inlineParse(line)}</p>)
+    }
+
+    return elements
+  }
+
+  function inlineParse(text: string): React.ReactNode[] {
+    const parts = text.split(/(\*\*[^*]+\*\*)/)
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+      }
+      return part
+    })
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -119,13 +157,13 @@ export function PatientChat({ patientId }: PatientChatProps) {
               </div>
               <div
                 className={cn(
-                  "max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+                  "max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed space-y-1",
                   msg.role === "user"
                     ? "bg-primary text-primary-foreground rounded-tr-sm"
                     : "bg-muted text-foreground rounded-tl-sm"
                 )}
               >
-                {msg.content}
+                {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
               </div>
             </div>
           ))}
