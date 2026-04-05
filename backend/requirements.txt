@@ -1,3 +1,4 @@
+
 fastapi
 uvicorn
 python-dotenv
@@ -6,3 +7,4 @@ postgrest
 google-genai
 pydantic
 pydantic-settings
+openai
