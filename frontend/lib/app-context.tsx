@@ -25,6 +25,8 @@ interface AppContextValue {
   identity: Identity
   /** Backward-compat: equals identity.id when role === "patient", else null */
   selectedUserId: string | null
+  /** True after sessionStorage has been read (avoids child effects running before restore). */
+  sessionRestored: boolean
   setSession: (role: Role, identity: Identity) => void
   clearSession: () => void
 }
@@ -33,6 +35,7 @@ const AppContext = createContext<AppContextValue>({
   role: null,
   identity: null,
   selectedUserId: null,
+  sessionRestored: false,
   setSession: () => {},
   clearSession: () => {},
 })
@@ -42,6 +45,7 @@ const STORAGE_KEY = "rehab_v2_session"
 export function AppProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>(null)
   const [identity, setIdentity] = useState<Identity>(null)
+  const [sessionRestored, setSessionRestored] = useState(false)
 
   useEffect(() => {
     try {
@@ -53,6 +57,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       // sessionStorage unavailable — proceed without restore
+    } finally {
+      setSessionRestored(true)
     }
   }, [])
 
@@ -75,7 +81,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectedUserId = role === "patient" && identity ? identity.id : null
 
   return (
-    <AppContext.Provider value={{ role, identity, selectedUserId, setSession, clearSession }}>
+    <AppContext.Provider
+      value={{ role, identity, selectedUserId, sessionRestored, setSession, clearSession }}
+    >
       {children}
     </AppContext.Provider>
   )

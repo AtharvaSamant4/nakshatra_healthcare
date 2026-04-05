@@ -125,7 +125,17 @@ export default function GlobalError({
             </div>
           </div>
           <div className="error-summary">
-            {error.message || 'Unknown error'}
+            {typeof error.message === 'string'
+              ? error.message
+              : error.message != null
+                ? (() => {
+                    try {
+                      return JSON.stringify(error.message)
+                    } catch {
+                      return String(error.message)
+                    }
+                  })()
+                : 'Unknown error'}
           </div>
           {error.stack && (
             <div className="error-details-wrapper">

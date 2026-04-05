@@ -139,21 +139,31 @@ export default function PatientExercisePage() {
     setSessionAccuracy(Math.round(form_score * 100))
 
     if (selectedUserId && selectedExerciseId && startedAt) {
-      try {
-        const result = await sessionsApi.create({
-          user_id: selectedUserId,
-          exercise_id: selectedExerciseId,
-          reps_completed: repCount,
-          form_score,
-          duration_seconds: duration,
-          started_at: startedAt,
-          completed_at: new Date().toISOString(),
-          ...(activePrescriptionId ? { prescription_id: activePrescriptionId } : {}),
-        })
-        setFeedbackId(result.feedback_id)
-      } catch (err) {
-        console.error("Failed to save session:", err)
+      const payload = {
+        user_id: selectedUserId,
+        exercise_id: selectedExerciseId,
+        reps_completed: repCount,
+        form_score,
+        duration_seconds: duration,
+        started_at: startedAt,
+        completed_at: new Date().toISOString(),
+        ...(activePrescriptionId ? { prescription_id: activePrescriptionId } : {}),
       }
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+      let lastErr: unknown
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (attempt > 0) await sleep(400 * attempt)
+          const result = await sessionsApi.create(payload)
+          setFeedbackId(result.feedback_id)
+          lastErr = undefined
+          break
+        } catch (err) {
+          lastErr = err
+          console.warn(`Session save attempt ${attempt + 1} failed`, err)
+        }
+      }
+      if (lastErr) console.error("Failed to save session after retries:", lastErr)
     }
     setSessionComplete(true)
   }, [selectedUserId, selectedExerciseId, repCount, duration, startedAt, activePrescriptionId, formQuality])

@@ -94,6 +94,9 @@ export function WebcamFeed({
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { output, processFrame, resetCounter } = useExerciseCounter({ angleConfig })
+  /** Latest frame processor — kept in a ref so the MediaPipe effect does not re-run when this identity changes. */
+  const processFrameRef = useRef(processFrame)
+  processFrameRef.current = processFrame
 
   useEffect(() => {
     metricsChangeRef.current = onMetricsChange
@@ -133,6 +136,7 @@ export function WebcamFeed({
     let poseInstance: { close?: () => void } | null = null
     let cameraInstance: { stop?: () => void } | null = null
     let disposed = false
+    let closeDelayTimer: ReturnType<typeof setTimeout> | null = null
 
     const startCamera = async () => {
       try {
@@ -164,6 +168,8 @@ export function WebcamFeed({
           })
 
           pose.onResults((results: { poseLandmarks?: Landmark[] }) => {
+            if (disposed) return
+
             const canvas = canvasRef.current
             const ctx = canvas?.getContext("2d")
             const activeVideo = videoRef.current
@@ -180,7 +186,7 @@ export function WebcamFeed({
 
             if (!results.poseLandmarks) return
 
-            const frameOutput = processFrame(results.poseLandmarks)
+            const frameOutput = processFrameRef.current(results.poseLandmarks)
 
             if (frameOutput && metricsChangeRef.current) {
               setLastTrackedAt(Date.now())
@@ -225,7 +231,12 @@ export function WebcamFeed({
 
           const camera = new window.Camera(videoEl, {
             onFrame: async () => {
-              await pose.send({ image: videoEl })
+              if (disposed) return
+              try {
+                await pose.send({ image: videoEl })
+              } catch {
+                // Pose WASM may be closing — ignore (common race on stop)
+              }
             },
             width: 1280,
             height: 720,
@@ -248,13 +259,33 @@ export function WebcamFeed({
 
     return () => {
       disposed = true
-      if (cameraInstance?.stop) cameraInstance.stop()
-      if (poseInstance?.close) poseInstance.close()
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
+      try {
+        cameraInstance?.stop?.()
+      } catch {
+        /* ignore */
       }
+      cameraInstance = null
+
+      const poseToClose = poseInstance
+      const mediaStream = stream
+      poseInstance = null
+      stream = null
+
+      if (closeDelayTimer) clearTimeout(closeDelayTimer)
+      // Let in-flight onFrame / pose.send finish before closing WASM graph
+      closeDelayTimer = setTimeout(() => {
+        closeDelayTimer = null
+        try {
+          poseToClose?.close?.()
+        } catch {
+          /* ignore */
+        }
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop())
+        }
+      }, 120)
     }
-  }, [isActive, processFrame, showDemo])
+  }, [isActive, showDemo])
 
   const poseDetected = isActive && Date.now() - lastTrackedAt < 900
   const targetReached = output.debug.targetReached

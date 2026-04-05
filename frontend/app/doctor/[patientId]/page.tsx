@@ -38,6 +38,7 @@ import { useApp } from "@/lib/app-context"
 import { Download, ArrowLeft, User, ClipboardList, Dumbbell, MessageSquare, Plus, Save, FileText, RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, BarChart2, Target, Flame, Brain, Zap, Activity } from "lucide-react"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line, PieChart, Pie, Cell } from "recharts"
 import { DoctorChat } from "@/components/ai/doctor-chat"
+import { normalizeReportBullets } from "@/lib/utils"
 
 const STATUS_COLORS: Record<string, string> = {
   registered: "bg-muted text-muted-foreground",
@@ -302,33 +303,41 @@ export default function PatientDetailPage({
       }
 
       // ── Key Issues ──────────────────────────────────────────────────────────
-      if (rj.key_issues?.length) {
-        checkPage(10 + rj.key_issues.length * 6)
+      const keyIssuesPdf = normalizeReportBullets(rj.key_issues as unknown[] | undefined)
+      if (keyIssuesPdf.length) {
+        checkPage(10 + keyIssuesPdf.length * 6)
         sectionHeader('KEY CLINICAL ISSUES')
-        rj.key_issues.forEach((issue: string, ii: number) => {
+        keyIssuesPdf.forEach((issue, ii) => {
           checkPage(8)
           setFill(RED_BG); setDraw([255,200,200]); doc.setLineWidth(0.2)
           doc.rect(ML, y - 3.5, TW, 6.5, 'FD')
           bold(8.5); setColor(RED_FG); doc.text(`${ii + 1}.`, ML + 2, y + 1.5)
-          normal(8.5); setColor(DARK); doc.text(issue, ML + 9, y + 1.5)
-          y += 7.5
+          normal(8.5); setColor(DARK)
+          const issueLines = doc.splitTextToSize(issue, TW - 12)
+          issueLines.forEach((line: string, li: number) => {
+            doc.text(line, ML + 9, y + 1.5 + li * 4.5)
+          })
+          y += 7.5 + Math.max(0, issueLines.length - 1) * 4.5
         })
         y += 2
       }
 
       // ── Recommendations ─────────────────────────────────────────────────────
-      if (rj.recommendations?.length) {
-        checkPage(10 + rj.recommendations.length * 7)
+      const recsPdf = normalizeReportBullets(rj.recommendations as unknown[] | undefined)
+      if (recsPdf.length) {
+        checkPage(10 + recsPdf.length * 7)
         sectionHeader('CLINICAL RECOMMENDATIONS')
-        rj.recommendations.forEach((rec: string, ri: number) => {
+        recsPdf.forEach((rec) => {
           checkPage(8)
           setFill(GREEN_BG); setDraw([180,230,200]); doc.setLineWidth(0.2)
           doc.rect(ML, y - 3.5, TW, 6.5, 'FD')
           bold(8.5); setColor(GREEN_FG); doc.text('✓', ML + 2, y + 1.5)
           normal(8.5); setColor(DARK)
           const recLines = doc.splitTextToSize(rec, TW - 12)
-          doc.text(recLines[0], ML + 9, y + 1.5)
-          y += 7.5
+          recLines.forEach((line: string, li: number) => {
+            doc.text(line, ML + 9, y + 1.5 + li * 4.5)
+          })
+          y += 7.5 + Math.max(0, recLines.length - 1) * 4.5
         })
         y += 2
       }
@@ -1020,11 +1029,11 @@ export default function PatientDetailPage({
                       </CardHeader>
                       <CardContent className="space-y-3 text-sm">
                         <p className="text-foreground leading-relaxed">{rj.summary}</p>
-                        {(rj.key_issues?.length ?? 0) > 0 && (
+                        {normalizeReportBullets(rj.key_issues as unknown[]).length > 0 && (
                           <div>
                             <p className="font-medium text-muted-foreground mb-1">Key Issues</p>
                             <ul className="space-y-1">
-                              {rj.key_issues!.map((issue, j) => (
+                              {normalizeReportBullets(rj.key_issues as unknown[]).map((issue, j) => (
                                 <li key={j} className="flex items-start gap-2 text-foreground">
                                   <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" />
                                   {issue}
@@ -1033,11 +1042,11 @@ export default function PatientDetailPage({
                             </ul>
                           </div>
                         )}
-                        {(rj.recommendations?.length ?? 0) > 0 && (
+                        {normalizeReportBullets(rj.recommendations as unknown[]).length > 0 && (
                           <div>
                             <p className="font-medium text-muted-foreground mb-1">Recommendations</p>
                             <ul className="space-y-1">
-                              {rj.recommendations!.map((rec, j) => (
+                              {normalizeReportBullets(rj.recommendations as unknown[]).map((rec, j) => (
                                 <li key={j} className="flex items-start gap-2 text-foreground">
                                   <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
                                   {rec}

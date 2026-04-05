@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.db.supabase_client import get_supabase
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+# Under /api/auth so same-origin Next.js rewrite (/api/* → FastAPI) matches other routers.
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
     email: str

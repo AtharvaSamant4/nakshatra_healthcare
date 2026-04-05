@@ -1,23 +1,72 @@
 // All backend API calls go through this file.
-// Base URL comes from NEXT_PUBLIC_API_URL env var (default: http://localhost:8000)
+// If NEXT_PUBLIC_API_URL is unset or empty, requests use same-origin "/api/*"
+// and Next.js proxies to FastAPI (see next.config.mjs rewrites + BACKEND_URL).
+// Set NEXT_PUBLIC_API_URL only when the API is on another host (e.g. production).
 
-const BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "")
+const trimmedBase = process.env.NEXT_PUBLIC_API_URL?.trim()
+const BASE = trimmedBase ? trimmedBase.replace(/\/$/, "") : ""
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  let res: Response
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown network error"
-    throw new Error(`Network request failed for ${BASE}${path}: ${message}`)
+  const url = `${BASE}${path}`
+  const init: RequestInit = {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  }
+
+  let res: Response | undefined
+  let lastNetworkError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await fetch(url, init)
+      break
+    } catch (error) {
+      lastNetworkError = error
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 350))
+        continue
+      }
+      const message =
+        lastNetworkError instanceof Error ? lastNetworkError.message : "Unknown network error"
+      throw new Error(`Network request failed for ${url}: ${message}`)
+    }
+  }
+
+  if (!res) {
+    const message =
+      lastNetworkError instanceof Error ? lastNetworkError.message : "Unknown network error"
+    throw new Error(`Network request failed for ${url}: ${message}`)
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail ?? `Request failed: ${res.status}`)
+    const detail = body.detail
+    let detailStr: string
+    if (detail == null) detailStr = ""
+    else if (typeof detail === "string") detailStr = detail
+    else if (Array.isArray(detail)) {
+      detailStr = detail
+        .map((e: unknown) => {
+          if (e && typeof e === "object" && "msg" in e)
+            return String((e as { msg: unknown }).msg)
+          if (e && typeof e === "object" && "message" in e)
+            return String((e as { message: unknown }).message)
+          try {
+            return JSON.stringify(e)
+          } catch {
+            return String(e)
+          }
+        })
+        .join("; ")
+    } else if (typeof detail === "object") {
+      try {
+        detailStr = JSON.stringify(detail)
+      } catch {
+        detailStr = String(detail)
+      }
+    } else {
+      detailStr = String(detail)
+    }
+    throw new Error(detailStr || `Request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
 }
@@ -697,8 +746,9 @@ export interface ReportJson {
   summary?: string
   progress_trend?: "improving" | "stable" | "declining"
   risk_level?: "low" | "medium" | "high"
-  key_issues?: string[]
-  recommendations?: string[]
+  /** Often string[]; Gemini may return `{ issue, description }[]`. */
+  key_issues?: unknown[]
+  recommendations?: unknown[]
   next_plan?: string
   // weekly report extra fields
   improvement?: number
@@ -765,7 +815,7 @@ export interface RecoveryScore {
 export const authApi = {
   login: (payload: { email: string; password: string }) =>
     request<{ token: string; role: string; user: Patient }>(
-      "/auth/login",
+      "/api/auth/login",
       { method: "POST", body: JSON.stringify(payload) }
     ),
 }

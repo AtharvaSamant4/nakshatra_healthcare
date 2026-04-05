@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { StatsCard } from "@/components/dashboard/stats-card"
@@ -25,7 +25,7 @@ import { PatientChat } from "@/components/ai/patient-chat"
 import { AIRecommendation } from "@/components/dashboard/ai-recommendation"
 
 export default function PatientDashboard() {
-  const { selectedUserId, identity, role } = useApp()
+  const { selectedUserId, identity, role, sessionRestored } = useApp()
   const router = useRouter()
 
   const [progress, setProgress] = useState<ProgressResponse | null>(null)
@@ -38,52 +38,122 @@ export default function PatientDashboard() {
   const [recoveryScore, setRecoveryScore] = useState<number | null>(null)
   const [improvement, setImprovement] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
+  const loadSeq = useRef(0)
+
+  const loadDashboard = useCallback(async () => {
+    const uid = selectedUserId
+    if (!uid) return
+
+    const seq = ++loadSeq.current
+    setLoading(true)
+
+    try {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+    let prog: ProgressResponse | null = null
+    let sessionsList: SessionListItem[] = []
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(400 * attempt)
+      try {
+        const [p, s] = await Promise.all([
+          progressApi.get(uid),
+          sessionsApi.list(uid, 5),
+        ])
+        if (seq !== loadSeq.current) return
+        prog = p
+        sessionsList = s.sessions
+        break
+      } catch (e) {
+        console.warn(`Dashboard core data attempt ${attempt + 1}/3 failed`, e)
+        if (attempt === 2 && seq === loadSeq.current) console.error(e)
+      }
+    }
+
+    if (seq !== loadSeq.current) return
+
+    if (prog) setProgress(prog)
+    setRecentSessions(sessionsList)
+
+    const settled = await Promise.allSettled([
+      prescriptionsApi.list(uid).catch(() => [] as Prescription[]),
+      aiApi.listRecommendations(uid).catch(() => []),
+      aiApi.recoveryPrediction(uid).catch(() => null),
+      aiApi.adaptivePlan(uid).catch(() => null),
+      aiApi.calculateRisk(uid).catch(() => null),
+      aiApi.recoveryScore(uid).catch(() => null),
+      progressApi.improvement(uid).catch(() => null),
+    ])
+
+    if (seq !== loadSeq.current) return
+
+    const rx = settled[0].status === "fulfilled" ? settled[0].value : []
+    setPrescriptions((Array.isArray(rx) ? rx : []).filter((p) => p.status === "active"))
+
+    const recs = settled[1].status === "fulfilled" ? settled[1].value : []
+    if (Array.isArray(recs) && recs.length > 0) {
+      setRecommendation(recs[0].recommendation)
+    } else {
+      try {
+        const generated = await aiApi.recommendPlan(uid)
+        if (seq !== loadSeq.current) return
+        if (generated?.recommendation) setRecommendation(generated.recommendation)
+      } catch {
+        /* optional */
+      }
+    }
+
+    const recovery = settled[2].status === "fulfilled" ? settled[2].value : null
+    const adaptive = settled[3].status === "fulfilled" ? settled[3].value : null
+    const risk = settled[4].status === "fulfilled" ? settled[4].value : null
+    const recScore = settled[5].status === "fulfilled" ? settled[5].value : null
+    const impData = settled[6].status === "fulfilled" ? settled[6].value : null
+
+    if (recovery)
+      setRecoveryDays({
+        estimated_days: recovery.estimated_days ?? null,
+        confidence: recovery.confidence ?? "",
+      })
+    if (adaptive)
+      setAdaptivePlan(adaptive as { reps: number; sets: number; intensity: string; reason: string })
+    if (risk) setRiskAssessment(risk as { risk_level: string; reasons: string[] })
+    if (recScore) setRecoveryScore(recScore.recovery_score ?? null)
+    if (impData) setImprovement(impData.improvement)
+    } finally {
+      if (seq === loadSeq.current) setLoading(false)
+    }
+  }, [selectedUserId])
 
   useEffect(() => {
+    if (!sessionRestored) return
     if (role !== "patient") {
       router.replace("/login")
       return
     }
     if (!selectedUserId) return
+    void loadDashboard()
+  }, [sessionRestored, selectedUserId, role, router, loadDashboard])
 
-    setLoading(true)
-    Promise.all([
-      progressApi.get(selectedUserId),
-      sessionsApi.list(selectedUserId, 5),
-      prescriptionsApi.list(selectedUserId).catch(() => [] as Prescription[]),
-      aiApi.listRecommendations(selectedUserId).catch(() => []),
-      aiApi.recoveryPrediction(selectedUserId).catch(() => null),
-      aiApi.adaptivePlan(selectedUserId).catch(() => null),
-      aiApi.calculateRisk(selectedUserId).catch(() => null),
-      aiApi.recoveryScore(selectedUserId).catch(() => null),
-      progressApi.improvement(selectedUserId).catch(() => null),
-    ])
-      .then(async ([prog, sessions, rx, recs, recovery, adaptive, risk, recScore, impData]) => {
-        setProgress(prog)
-        setRecentSessions(sessions.sessions)
-        setPrescriptions(rx.filter((p) => p.status === "active"))
+  useEffect(() => {
+    if (!sessionRestored || role !== "patient" || !selectedUserId) return
 
-        if (recs.length > 0) {
-          setRecommendation(recs[0].recommendation)
-        } else {
-          // No recommendation exists yet — auto-generate one silently
-          try {
-            const generated = await aiApi.recommendPlan(selectedUserId)
-            if (generated?.recommendation) setRecommendation(generated.recommendation)
-          } catch {
-            // Silently ignore — component shows fallback message
-          }
-        }
+    let t: ReturnType<typeof setTimeout> | undefined
+    const debounced = () => {
+      if (t) clearTimeout(t)
+      t = setTimeout(() => void loadDashboard(), 800)
+    }
 
-        if (recovery) setRecoveryDays({ estimated_days: recovery.estimated_days ?? null, confidence: recovery.confidence ?? "" })
-        if (adaptive) setAdaptivePlan(adaptive as { reps: number; sets: number; intensity: string; reason: string })
-        if (risk) setRiskAssessment(risk as { risk_level: string; reasons: string[] })
-        if (recScore) setRecoveryScore(recScore.recovery_score ?? null)
-        if (impData) setImprovement(impData.improvement)
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [selectedUserId, role, router])
+    const onVis = () => {
+      if (document.visibilityState === "visible") debounced()
+    }
+    window.addEventListener("focus", debounced)
+    document.addEventListener("visibilitychange", onVis)
+    return () => {
+      if (t) clearTimeout(t)
+      window.removeEventListener("focus", debounced)
+      document.removeEventListener("visibilitychange", onVis)
+    }
+  }, [sessionRestored, role, selectedUserId, loadDashboard])
 
   return (
     <AppLayout>

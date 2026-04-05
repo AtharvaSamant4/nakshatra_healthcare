@@ -25,6 +25,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Local HTTPS dev certs (mkcert, etc.) — never commit keys
+frontend/certificates/
+
 # OS / editor
 .DS_Store
 Thumbs.db
