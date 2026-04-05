@@ -10,12 +10,18 @@ from app.routers import plan
 
 app = FastAPI(title="Nakshatra Healthcare API", version="1.0.0")
 
+import os
+
+origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 app.include_router(users.router)
 app.include_router(exercises.router)
