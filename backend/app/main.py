@@ -6,6 +6,7 @@ from fastapi.exception_handlers import http_exception_handler
 from app.routers import users, exercises, sessions, games, progress, feedback, cognitive_tests
 from app.routers import staff, patients, prescriptions, messages, ai
 from app.routers import auth
+from app.routers import plan
 
 app = FastAPI(title="Nakshatra Healthcare API", version="1.0.0")
 
@@ -30,6 +31,7 @@ app.include_router(prescriptions.router)
 app.include_router(messages.router)
 app.include_router(ai.router)
 app.include_router(auth.router)
+app.include_router(plan.router)
 
 
 @app.exception_handler(HTTPException)

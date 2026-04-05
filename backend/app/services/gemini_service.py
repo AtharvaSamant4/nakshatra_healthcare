@@ -122,8 +122,24 @@ def _parse_json(text: str, fallback: dict) -> dict:
     except:
         return fallback
 
-def generate_exercise_feedback(session_data: dict, history: list[dict]) -> dict:
-    prompt = f"Respond with ONLY JSON. Session: {session_data}, History: {history}. Needs keys: summary(str), tips(list), encouragement(str), focus_areas(list), recovery_score(int 1-10)."
+def generate_exercise_feedback(
+    session_data: dict,
+    history: list[dict],
+    patient_context: dict | None = None,
+) -> dict:
+    clinical = ""
+    if patient_context:
+        diagnosis = patient_context.get("diagnosis") or "Not specified"
+        injury_type = patient_context.get("injury_type") or "Not specified"
+        severity = patient_context.get("severity") or "Not specified"
+        clinical = (
+            f" Patient clinical context — diagnosis: {diagnosis}, "
+            f"injury_type: {injury_type}, severity: {severity}."
+        )
+    prompt = (
+        f"Respond with ONLY JSON. Session: {session_data}, History: {history}.{clinical} "
+        "Needs keys: summary(str), tips(list), encouragement(str), focus_areas(list), recovery_score(int 1-10)."
+    )
     try:
         return _parse_json(_get_client().generate(prompt, True), _FALLBACK_EXERCISE)
     except Exception as e:

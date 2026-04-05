@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { WebcamFeed } from "@/components/exercise/webcam-feed"
@@ -48,6 +48,15 @@ export default function PatientExercisePage() {
   const [startedAt, setStartedAt] = useState<string>("")
   const [sessionAccuracy, setSessionAccuracy] = useState(0)
   const [feedbackId, setFeedbackId] = useState<string | undefined>(undefined)
+
+  const progressiveScoreSumRef = useRef(0)
+  const progressiveScoreCountRef = useRef(0)
+  const postureScoreSumRef = useRef(0)
+  const postureScoreCountRef = useRef(0)
+  const angleMinRef = useRef<number | null>(null)
+  const angleMaxRef = useRef<number | null>(null)
+  const angleSumRef = useRef(0)
+  const angleCountRef = useRef(0)
 
   useEffect(() => {
     if (role !== "patient") {
@@ -110,15 +119,47 @@ export default function PatientExercisePage() {
     calibrated: boolean
     upThreshold: number
     downThreshold: number
+    score?: number
+    quality?: string
+    postureScore?: number
   }) => {
     setRepCount(metrics.repCount)
     setFormQuality(metrics.formQuality)
     setCurrentAngle(Math.round(metrics.currentAngle))
     setCurrentState(metrics.currentState)
     setActiveSide(metrics.activeSide)
+    if (metrics.calibrated) {
+      const ang = metrics.currentAngle
+      if (Number.isFinite(ang)) {
+        angleSumRef.current += ang
+        angleCountRef.current += 1
+        if (angleMinRef.current === null || ang < angleMinRef.current) {
+          angleMinRef.current = ang
+        }
+        if (angleMaxRef.current === null || ang > angleMaxRef.current) {
+          angleMaxRef.current = ang
+        }
+      }
+      if (typeof metrics.score === "number") {
+        progressiveScoreSumRef.current += metrics.score
+        progressiveScoreCountRef.current += 1
+      }
+      if (typeof metrics.postureScore === "number") {
+        postureScoreSumRef.current += metrics.postureScore
+        postureScoreCountRef.current += 1
+      }
+    }
   }, [])
 
   const handleStart = useCallback(() => {
+    progressiveScoreSumRef.current = 0
+    progressiveScoreCountRef.current = 0
+    postureScoreSumRef.current = 0
+    postureScoreCountRef.current = 0
+    angleMinRef.current = null
+    angleMaxRef.current = null
+    angleSumRef.current = 0
+    angleCountRef.current = 0
     setStartedAt(new Date().toISOString())
     setIsPreparing(true)
     setDemoSecondsRemaining(DEMO_DURATION_SECONDS)
@@ -131,14 +172,49 @@ export default function PatientExercisePage() {
 
   const handleStop = useCallback(async () => {
     setIsActive(false)
-    // Derive form_score from real posture quality
-    const form_score =
-      formQuality === "good" ? 0.9 :
-      formQuality === "neutral" ? 0.7 :
-      0.5
+
+    const nProg = progressiveScoreCountRef.current
+    const avgProg =
+      nProg > 0 ? progressiveScoreSumRef.current / nProg : null
+    const nPos = postureScoreCountRef.current
+    const avgPosture =
+      nPos > 0 ? postureScoreSumRef.current / nPos : null
+
+    // Session-level form 0–1: prefer average progressive ROM, then average posture bar.
+    // Do NOT use end-of-session formQuality alone (arm at rest → "bad" → 50% every time).
+    let form_score: number
+    if (avgProg != null) {
+      form_score = Math.max(0.06, Math.min(1, avgProg / 100))
+    } else if (avgPosture != null) {
+      form_score = Math.max(0.06, Math.min(1, avgPosture / 100))
+    } else if (repCount > 0) {
+      const base =
+        formQuality === "good" ? 0.58 : formQuality === "neutral" ? 0.48 : 0.4
+      form_score = Math.min(0.92, base + 0.035 * Math.min(repCount, 14))
+    } else {
+      form_score = 0.35
+    }
+
+    const score =
+      avgProg != null
+        ? Math.round(avgProg)
+        : Math.round(form_score * 100)
+    let quality = "poor"
+    if (score >= 85) quality = "perfect"
+    else if (score >= 60) quality = "good"
+    else if (score >= 30) quality = "improving"
+    console.log("Exercise Score:", score, quality, "form_score", form_score)
+
     setSessionAccuracy(Math.round(form_score * 100))
 
     if (selectedUserId && selectedExerciseId && startedAt) {
+      const na = angleCountRef.current
+      const avg_angle = na > 0 ? angleSumRef.current / na : undefined
+      const min_angle =
+        angleMinRef.current != null ? angleMinRef.current : undefined
+      const max_angle =
+        angleMaxRef.current != null ? angleMaxRef.current : undefined
+
       const payload = {
         user_id: selectedUserId,
         exercise_id: selectedExerciseId,
@@ -147,6 +223,11 @@ export default function PatientExercisePage() {
         duration_seconds: duration,
         started_at: startedAt,
         completed_at: new Date().toISOString(),
+        score,
+        quality,
+        ...(avg_angle != null ? { avg_angle } : {}),
+        ...(min_angle != null ? { min_angle } : {}),
+        ...(max_angle != null ? { max_angle } : {}),
         ...(activePrescriptionId ? { prescription_id: activePrescriptionId } : {}),
       }
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -169,6 +250,14 @@ export default function PatientExercisePage() {
   }, [selectedUserId, selectedExerciseId, repCount, duration, startedAt, activePrescriptionId, formQuality])
 
   const handleReset = useCallback(() => {
+    progressiveScoreSumRef.current = 0
+    progressiveScoreCountRef.current = 0
+    postureScoreSumRef.current = 0
+    postureScoreCountRef.current = 0
+    angleMinRef.current = null
+    angleMaxRef.current = null
+    angleSumRef.current = 0
+    angleCountRef.current = 0
     setRepCount(0)
     setDuration(0)
     setFormQuality("neutral")

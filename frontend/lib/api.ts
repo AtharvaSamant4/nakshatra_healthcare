@@ -268,6 +268,16 @@ export interface CreateSessionPayload {
   angle_history?: AngleHistoryItem[]
   started_at: string
   completed_at: string
+  /** Progressive ROM score 0–100 (optional; backend may ignore until stored). */
+  score?: number
+  /** Progressive quality label: perfect | good | improving | poor */
+  quality?: string
+}
+
+export interface SessionProgressComparison {
+  difference: number
+  status: "improved" | "same" | "declined"
+  message: string
 }
 
 export interface SessionCreateResponse {
@@ -283,6 +293,12 @@ export interface SessionCreateResponse {
   started_at: string
   completed_at: string
   feedback_id: string
+  progress?: SessionProgressComparison | null
+}
+
+export interface AdaptivePlanResponse {
+  plan: string[]
+  note: string
 }
 
 export interface SessionListItem {
@@ -292,6 +308,8 @@ export interface SessionListItem {
   form_score?: number
   duration_seconds?: number
   completed_at: string
+  progressive_score?: number | null
+  progressive_quality?: string | null
 }
 
 export interface SessionListResponse {
@@ -470,11 +488,14 @@ export const sessionsApi = {
       body: JSON.stringify(payload),
     }),
   list: (user_id: string, limit = 20, offset = 0) =>
-    requestWithFallback<SessionListResponse>(
-      `/api/sessions?user_id=${user_id}&limit=${limit}&offset=${offset}`,
-      { sessions: [], total: 0 },
-      "Sessions API"
+    request<SessionListResponse>(
+      `/api/sessions?user_id=${user_id}&limit=${limit}&offset=${offset}`
     ),
+}
+
+export const plansApi = {
+  get: (patientId: string) =>
+    request<AdaptivePlanResponse>(`/api/plan/${patientId}`),
 }
 
 // ─── Game Sessions ────────────────────────────────────────────────────────────

@@ -26,6 +26,12 @@ interface WebcamFeedProps {
     calibrated: boolean
     upThreshold: number
     downThreshold: number
+    /** Progressive ROM 0–100 (parallel scoring; does not affect reps). */
+    score?: number
+    /** progressive quality: perfect | good | improving | poor */
+    quality?: string
+    /** 0–100 posture / ROM bar from counter (session average should use this, not end-frame formQuality). */
+    postureScore?: number
   }) => void
 }
 
@@ -211,6 +217,9 @@ export function WebcamFeed({
                 calibrated: frameOutput.debug.calibrated,
                 upThreshold: frameOutput.debug.upThreshold,
                 downThreshold: frameOutput.debug.downThreshold,
+                score: frameOutput.score,
+                quality: frameOutput.quality,
+                postureScore: frameOutput.debug.postureScore,
               })
             }
 

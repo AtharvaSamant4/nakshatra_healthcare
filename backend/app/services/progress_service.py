@@ -60,13 +60,24 @@ def get_progress(user_id: str) -> ProgressResponse:
         raise HTTPException(status_code=404, detail="User not found")
 
     # --- Fetch all exercise sessions ---
-    ex_sessions_resp = (
-        supabase.table("exercise_sessions")
-        .select("id, exercise_id, reps_completed, form_score, completed_at")
-        .eq("user_id", user_id)
-        .order("completed_at", desc=False)
-        .execute()
-    )
+    try:
+        ex_sessions_resp = (
+            supabase.table("exercise_sessions")
+            .select(
+                "id, exercise_id, reps_completed, form_score, completed_at, progressive_score"
+            )
+            .eq("user_id", user_id)
+            .order("completed_at", desc=False)
+            .execute()
+        )
+    except Exception:
+        ex_sessions_resp = (
+            supabase.table("exercise_sessions")
+            .select("id, exercise_id, reps_completed, form_score, completed_at")
+            .eq("user_id", user_id)
+            .order("completed_at", desc=False)
+            .execute()
+        )
     ex_sessions = ex_sessions_resp.data or []
 
     # --- Fetch all game sessions ---
@@ -93,7 +104,24 @@ def get_progress(user_id: str) -> ProgressResponse:
 
     # --- Summary aggregates ---
     total_reps = sum(s.get("reps_completed", 0) or 0 for s in ex_sessions)
-    all_form_scores = [s["form_score"] for s in ex_sessions if s.get("form_score") is not None]
+
+    def _session_form_equivalent(s: dict) -> float | None:
+        if s.get("form_score") is not None:
+            try:
+                return float(s["form_score"])
+            except (TypeError, ValueError):
+                pass
+        ps = s.get("progressive_score")
+        if ps is not None:
+            try:
+                return max(0.0, min(1.0, float(ps) / 100.0))
+            except (TypeError, ValueError):
+                pass
+        return None
+
+    all_form_scores = [
+        v for s in ex_sessions if (v := _session_form_equivalent(s)) is not None
+    ]
     avg_form_score = _safe_avg(all_form_scores)
 
     active_dates: set[str] = set()
@@ -121,8 +149,9 @@ def get_progress(user_id: str) -> ProgressResponse:
         day = _date_str(s["completed_at"])
         ex_by_day[day]["sessions"] += 1
         ex_by_day[day]["reps"].append(s.get("reps_completed", 0) or 0)
-        if s.get("form_score") is not None:
-            ex_by_day[day]["form_scores"].append(s["form_score"])
+        feq = _session_form_equivalent(s)
+        if feq is not None:
+            ex_by_day[day]["form_scores"].append(feq)
 
     exercise_progress = [
         ExerciseProgressDay(
@@ -174,8 +203,9 @@ def get_progress(user_id: str) -> ProgressResponse:
         if not bp:
             continue
         bp_map[bp]["sessions"] += 1
-        if s.get("form_score") is not None:
-            bp_map[bp]["form_scores"].append(s["form_score"])
+        feq = _session_form_equivalent(s)
+        if feq is not None:
+            bp_map[bp]["form_scores"].append(feq)
 
     body_part_breakdown = [
         BodyPartBreakdownItem(

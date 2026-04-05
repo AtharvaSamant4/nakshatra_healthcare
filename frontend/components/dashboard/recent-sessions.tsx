@@ -8,6 +8,8 @@ import { Clock, Dumbbell } from "lucide-react"
 interface RecentSessionsProps {
   sessions: SessionListItem[]
   loading?: boolean
+  /** Total exercise_sessions rows for this patient (may exceed `sessions.length`). */
+  totalInDb?: number
 }
 
 function formatDuration(seconds?: number): string {
@@ -25,6 +27,18 @@ function accuracyLabel(score?: number): string {
   return "Keep Going"
 }
 
+function formatCompletedAt(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })
+  } catch {
+    return iso
+  }
+}
+
 function accuracyBadgeClass(score?: number): string {
   if (score == null) return "bg-muted text-muted-foreground"
   const pct = score * 100
@@ -33,11 +47,24 @@ function accuracyBadgeClass(score?: number): string {
   return "bg-muted text-muted-foreground"
 }
 
-export function RecentSessions({ sessions, loading }: RecentSessionsProps) {
+export function RecentSessions({ sessions, loading, totalInDb }: RecentSessionsProps) {
+  const shown = sessions.length
+  const total = totalInDb ?? shown
+  const more = total > shown ? total - shown : 0
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg font-semibold">Recent Sessions</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Each row is one saved workout. The chart above groups multiple sessions on the same day.
+          {!loading && total > 0 && (
+            <span className="mt-1 block font-medium text-foreground">
+              Showing {shown} of {total} saved session{total === 1 ? "" : "s"}
+              {more > 0 ? ` · ${more} more in your history` : ""}
+            </span>
+          )}
+        </p>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? (
@@ -58,11 +85,17 @@ export function RecentSessions({ sessions, loading }: RecentSessionsProps) {
                   <p className="font-medium text-foreground">
                     {session.exercise_name ?? "Exercise"}
                   </p>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5 shrink-0" />
                     <span>{formatDuration(session.duration_seconds)}</span>
                     <span>•</span>
-                    <span>{new Date(session.completed_at).toLocaleDateString()}</span>
+                    <span>{formatCompletedAt(session.completed_at)}</span>
+                    {session.progressive_quality != null && session.progressive_quality !== "" && (
+                      <>
+                        <span>•</span>
+                        <span className="capitalize">ROM: {session.progressive_quality}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -70,16 +103,28 @@ export function RecentSessions({ sessions, loading }: RecentSessionsProps) {
                 <div className="text-right">
                   <p className="text-sm font-medium text-foreground">{session.reps_completed} reps</p>
                   <p className="text-xs text-muted-foreground">
-                    {session.form_score != null
-                      ? `${Math.round(session.form_score * 100)}% accuracy`
-                      : "—"}
+                    {session.progressive_score != null
+                      ? `${session.progressive_score}% ROM`
+                      : session.form_score != null
+                        ? `${Math.round(session.form_score * 100)}% form`
+                        : "—"}
                   </p>
                 </div>
                 <Badge
                   variant="secondary"
-                  className={accuracyBadgeClass(session.form_score)}
+                  className={accuracyBadgeClass(
+                    session.form_score ??
+                      (session.progressive_score != null
+                        ? session.progressive_score / 100
+                        : undefined)
+                  )}
                 >
-                  {accuracyLabel(session.form_score)}
+                  {accuracyLabel(
+                    session.form_score ??
+                      (session.progressive_score != null
+                        ? session.progressive_score / 100
+                        : undefined)
+                  )}
                 </Badge>
               </div>
             </div>

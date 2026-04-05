@@ -22,6 +22,10 @@ interface CounterOutput {
   repCount: number;
   currentState: MovementState;
   currentAngle: number;
+  /** Progressive ROM score 0–100 (parallel to rep counting; does not affect reps). */
+  score: number;
+  /** Label derived from {@link CounterOutput.score}. */
+  quality: string;
   debug: {
     maxAngle: number;
     minAngle: number;
@@ -188,6 +192,39 @@ const getSide = (joint: string): "left" | "right" =>
 const getMotionTrend = (target: number) =>
   target >= 95 ? "higher_is_target" : "lower_is_target";
 
+/**
+ * Progressive angle score (0–100) + quality label. Independent of rep validation.
+ * Uses baseline ↔ target as min/max range; inverts progress when motion trend is toward lower angles.
+ */
+const computeProgressiveScoreAndQuality = (
+  currentAngle: number,
+  baselineAngle: number,
+  targetAngle: number,
+  motionTrend: "higher_is_target" | "lower_is_target"
+): { score: number; quality: string } => {
+  let score = 0;
+  let quality = "poor";
+
+  const minTarget = Math.min(baselineAngle, targetAngle);
+  const maxTarget = Math.max(baselineAngle, targetAngle);
+  const clampedAngle = Math.max(minTarget, Math.min(currentAngle, maxTarget));
+  const denom = maxTarget - minTarget;
+  let progress =
+    denom > 0
+      ? motionTrend === "higher_is_target"
+        ? (clampedAngle - minTarget) / denom
+        : (maxTarget - clampedAngle) / denom
+      : 0;
+  progress = clamp(progress, 0, 1);
+  score = Math.round(progress * 100);
+
+  if (score >= 85) quality = "perfect";
+  else if (score >= 60) quality = "good";
+  else if (score >= 30) quality = "improving";
+
+  return { score, quality };
+};
+
 const buildSideState = (): SideState => ({
   phase: "BASELINE",
   repCount: 0,
@@ -239,6 +276,8 @@ export const useExerciseCounter = (options?: ExerciseCounterOptions) => {
     repCount: 0,
     currentState: "DOWN",
     currentAngle: 0,
+    score: 0,
+    quality: "poor",
     debug: {
       maxAngle: 0,
       minAngle: 180,
@@ -578,6 +617,19 @@ export const useExerciseCounter = (options?: ExerciseCounterOptions) => {
       const calibrated = baseline !== null;
       const postureScore = calibrated ? getPostureScore(smoothed) : 0;
 
+      let score = 0;
+      let quality = "poor";
+      if (baseline !== null) {
+        const pq = computeProgressiveScoreAndQuality(
+          smoothed,
+          baseline,
+          config.target_angle,
+          motionTrend
+        );
+        score = pq.score;
+        quality = pq.quality;
+      }
+
       const leftSt = stateRef.current.sides.left;
       const rightSt = stateRef.current.sides.right;
 
@@ -596,6 +648,8 @@ export const useExerciseCounter = (options?: ExerciseCounterOptions) => {
         repCount: st.repCount,
         currentState,
         currentAngle: smoothed,
+        score,
+        quality,
         debug: {
           maxAngle: motionTrend === "higher_is_target" ? (st.peakAngle === -Infinity ? 0 : st.peakAngle) : smoothed,
           minAngle: motionTrend === "lower_is_target" ? (st.peakAngle === Infinity ? 180 : st.peakAngle) : smoothed,
@@ -648,6 +702,8 @@ export const useExerciseCounter = (options?: ExerciseCounterOptions) => {
       repCount: 0,
       currentState: "DOWN",
       currentAngle: 0,
+      score: 0,
+      quality: "poor",
       debug: {
         maxAngle: 0,
         minAngle: 180,

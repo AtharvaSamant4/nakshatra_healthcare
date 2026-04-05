@@ -29,6 +29,10 @@ export function ProgressChart({ data, loading }: ProgressChartProps) {
     <Card>
       <CardHeader>
         <CardTitle className="text-lg font-semibold">Exercise Progress</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          One point per calendar day: reps and form % are daily totals / averages. Multiple sessions
+          the same day are combined here — use Recent Sessions for each workout.
+        </p>
       </CardHeader>
       <CardContent>
         {loading ? (

@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS public.exercise_sessions (
   started_at timestamp with time zone NOT NULL,
   completed_at timestamp with time zone NOT NULL,
   prescription_id uuid NULL,
+  progressive_score integer NULL,
+  progressive_quality text NULL,
   CONSTRAINT exercise_sessions_pkey PRIMARY KEY (id),
   CONSTRAINT exercise_sessions_user_id_fkey FOREIGN KEY (user_id)
     REFERENCES public.patients (id) ON DELETE CASCADE,

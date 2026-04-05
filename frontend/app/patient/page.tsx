@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { StatsCard } from "@/components/dashboard/stats-card"
 import { ProgressChart } from "@/components/dashboard/progress-chart"
@@ -14,11 +14,13 @@ import {
   progressApi,
   sessionsApi,
   prescriptionsApi,
+  plansApi,
   aiApi,
   type ProgressResponse,
   type SessionListItem,
   type Prescription,
   type RecommendationJson,
+  type AdaptivePlanResponse,
 } from "@/lib/api"
 import { Calendar, Dumbbell, Flame, Target, ClipboardList, Timer } from "lucide-react"
 import { PatientChat } from "@/components/ai/patient-chat"
@@ -27,9 +29,11 @@ import { AIRecommendation } from "@/components/dashboard/ai-recommendation"
 export default function PatientDashboard() {
   const { selectedUserId, identity, role, sessionRestored } = useApp()
   const router = useRouter()
+  const pathname = usePathname()
 
   const [progress, setProgress] = useState<ProgressResponse | null>(null)
   const [recentSessions, setRecentSessions] = useState<SessionListItem[]>([])
+  const [sessionsTotal, setSessionsTotal] = useState(0)
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
   const [recommendation, setRecommendation] = useState<RecommendationJson | null>(null)
   const [recoveryDays, setRecoveryDays] = useState<{ estimated_days: number | null; confidence: string } | null>(null)
@@ -37,6 +41,7 @@ export default function PatientDashboard() {
   const [riskAssessment, setRiskAssessment] = useState<{ risk_level: string; reasons: string[] } | null>(null)
   const [recoveryScore, setRecoveryScore] = useState<number | null>(null)
   const [improvement, setImprovement] = useState<number | null>(null)
+  const [basicPlan, setBasicPlan] = useState<AdaptivePlanResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const loadSeq = useRef(0)
 
@@ -52,17 +57,19 @@ export default function PatientDashboard() {
 
     let prog: ProgressResponse | null = null
     let sessionsList: SessionListItem[] = []
+    let totalListed = 0
 
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await sleep(400 * attempt)
       try {
         const [p, s] = await Promise.all([
           progressApi.get(uid),
-          sessionsApi.list(uid, 5),
+          sessionsApi.list(uid, 50),
         ])
         if (seq !== loadSeq.current) return
         prog = p
         sessionsList = s.sessions
+        totalListed = s.total
         break
       } catch (e) {
         console.warn(`Dashboard core data attempt ${attempt + 1}/3 failed`, e)
@@ -74,6 +81,7 @@ export default function PatientDashboard() {
 
     if (prog) setProgress(prog)
     setRecentSessions(sessionsList)
+    setSessionsTotal(totalListed)
 
     const settled = await Promise.allSettled([
       prescriptionsApi.list(uid).catch(() => [] as Prescription[]),
@@ -83,6 +91,7 @@ export default function PatientDashboard() {
       aiApi.calculateRisk(uid).catch(() => null),
       aiApi.recoveryScore(uid).catch(() => null),
       progressApi.improvement(uid).catch(() => null),
+      plansApi.get(uid).catch(() => null),
     ])
 
     if (seq !== loadSeq.current) return
@@ -108,6 +117,7 @@ export default function PatientDashboard() {
     const risk = settled[4].status === "fulfilled" ? settled[4].value : null
     const recScore = settled[5].status === "fulfilled" ? settled[5].value : null
     const impData = settled[6].status === "fulfilled" ? settled[6].value : null
+    const planBasic = settled[7].status === "fulfilled" ? settled[7].value : null
 
     if (recovery)
       setRecoveryDays({
@@ -119,6 +129,16 @@ export default function PatientDashboard() {
     if (risk) setRiskAssessment(risk as { risk_level: string; reasons: string[] })
     if (recScore) setRecoveryScore(recScore.recovery_score ?? null)
     if (impData) setImprovement(impData.improvement)
+    if (
+      planBasic &&
+      typeof planBasic === "object" &&
+      planBasic !== null &&
+      Array.isArray((planBasic as AdaptivePlanResponse).plan)
+    ) {
+      setBasicPlan(planBasic as AdaptivePlanResponse)
+    } else {
+      setBasicPlan(null)
+    }
     } finally {
       if (seq === loadSeq.current) setLoading(false)
     }
@@ -131,8 +151,10 @@ export default function PatientDashboard() {
       return
     }
     if (!selectedUserId) return
+    const onPatientHome = pathname === "/patient" || pathname === "/patient/"
+    if (!onPatientHome) return
     void loadDashboard()
-  }, [sessionRestored, selectedUserId, role, router, loadDashboard])
+  }, [sessionRestored, selectedUserId, role, router, loadDashboard, pathname])
 
   useEffect(() => {
     if (!sessionRestored || role !== "patient" || !selectedUserId) return
@@ -329,6 +351,24 @@ export default function PatientDashboard() {
           </Card>
         )}
 
+        {basicPlan && basicPlan.plan.length > 0 && (
+          <Card className="border-border/80">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Suggested exercise focus</CardTitle>
+              <p className="text-sm text-muted-foreground">{basicPlan.note}</p>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {basicPlan.plan.map((slug) => (
+                  <Badge key={slug} variant="secondary" className="font-mono text-xs">
+                    {slug.replace(/_/g, " ")}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <ProgressChart data={progress?.exercise_progress ?? []} loading={loading} />
@@ -345,7 +385,11 @@ export default function PatientDashboard() {
           onRefresh={(rec) => setRecommendation(rec)}
         />
 
-        <RecentSessions sessions={recentSessions} loading={loading} />
+        <RecentSessions
+          sessions={recentSessions}
+          loading={loading}
+          totalInDb={sessionsTotal}
+        />
 
         {/* AI Therapist Chat */}
         {selectedUserId && (

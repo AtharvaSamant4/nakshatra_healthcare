@@ -8,14 +8,96 @@ from app.models.session_models import (
     SessionDetail,
     SessionListItem,
     SessionListResponse,
+    SessionProgressComparison,
 )
 from app.services import gemini_service, feedback_service
 
 logger = logging.getLogger(__name__)
 
 
+def compare_sessions(current_score: int, previous_score: int) -> dict:
+    """
+    Compare two session scores (0–100 scale). Thresholds: ±5 = same band.
+    """
+    diff = current_score - previous_score
+    if diff > 5:
+        return {
+            "difference": diff,
+            "status": "improved",
+            "message": f"You improved by {diff}%",
+        }
+    if diff < -5:
+        return {
+            "difference": diff,
+            "status": "declined",
+            "message": "Try to improve your movement range",
+        }
+    return {
+        "difference": diff,
+        "status": "same",
+        "message": "You are maintaining your performance",
+    }
+
+
+def _score_int_from_form_score(form_score: object) -> int | None:
+    if form_score is None:
+        return None
+    try:
+        return int(round(float(form_score) * 100))
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_derived_score_int(row: dict) -> int | None:
+    """Prefer stored progressive_score (0–100), else derive from form_score."""
+    ps = row.get("progressive_score")
+    if ps is not None:
+        try:
+            return int(ps)
+        except (TypeError, ValueError):
+            pass
+    return _score_int_from_form_score(row.get("form_score"))
+
+
+def get_last_session(patient_id: str, exercise_id: str):
+    """
+    Latest session for this patient + exercise (by completed_at; no created_at column).
+    Returns previous score 0–100 from progressive_score or form_score, or None if none exists.
+    """
+    supabase = get_supabase()
+    try:
+        try:
+            resp = (
+                supabase.table("exercise_sessions")
+                .select("form_score, progressive_score")
+                .eq("user_id", patient_id)
+                .eq("exercise_id", exercise_id)
+                .order("completed_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            resp = (
+                supabase.table("exercise_sessions")
+                .select("form_score")
+                .eq("user_id", patient_id)
+                .eq("exercise_id", exercise_id)
+                .order("completed_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+    except Exception as exc:
+        logger.warning("get_last_session failed: %s", exc)
+        return None
+    if not resp.data:
+        return None
+    return _row_derived_score_int(resp.data[0])
+
+
 def create_session(payload: SessionCreate) -> SessionCreateResponse:
     supabase = get_supabase()
+
+    previous_score = get_last_session(payload.user_id, payload.exercise_id)
 
     # Resolve exercise name + body_part for the Gemini prompt
     exercise_row = (
@@ -69,37 +151,80 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
     if payload.prescription_id:
         row["prescription_id"] = payload.prescription_id
 
-    # Insert session — if prescription_id column doesn't exist yet, retry without it
-    try:
-        insert_response = supabase.table("exercise_sessions").insert(row).execute()
-    except Exception as exc:
-        if payload.prescription_id and "prescription_id" in row:
-            logger.warning(
-                "prescription_id column not found, inserting without it: %s", exc
-            )
-            row_without_rx = {k: v for k, v in row.items() if k != "prescription_id"}
-            insert_response = (
-                supabase.table("exercise_sessions").insert(row_without_rx).execute()
-            )
-        else:
-            raise
+    if payload.score is not None:
+        row["progressive_score"] = int(payload.score)
+    if payload.quality is not None:
+        row["progressive_quality"] = str(payload.quality)[:200]
 
-    if not insert_response.data:
-        raise HTTPException(status_code=500, detail="Failed to save exercise session")
+    # Insert with fallbacks: drop progressive_* and/or prescription_id if columns/FK missing
+    try_order: list[dict] = [dict(row)]
+    no_prog = {
+        k: v
+        for k, v in row.items()
+        if k not in ("progressive_score", "progressive_quality")
+    }
+    if no_prog != row:
+        try_order.append(no_prog)
+    if payload.prescription_id and "prescription_id" in row:
+        no_rx = {k: v for k, v in row.items() if k != "prescription_id"}
+        if no_rx not in try_order:
+            try_order.append(no_rx)
+        no_rx_prog = {
+            k: v
+            for k, v in no_rx.items()
+            if k not in ("progressive_score", "progressive_quality")
+        }
+        if no_rx_prog not in try_order:
+            try_order.append(no_rx_prog)
+
+    insert_response = None
+    last_exc: Exception | None = None
+    for attempt_row in try_order:
+        try:
+            insert_response = (
+                supabase.table("exercise_sessions").insert(attempt_row).execute()
+            )
+            if insert_response.data:
+                break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "exercise_sessions insert failed (trying next shape if any): %s", exc
+            )
+            insert_response = None
+
+    if not insert_response or not insert_response.data:
+        raise HTTPException(
+            status_code=500, detail="Failed to save exercise session"
+        ) from last_exc
 
     session_id = insert_response.data[0]["id"]
 
     # Fetch recent history for this user + exercise (last 5 sessions before this one)
-    history_response = (
-        supabase.table("exercise_sessions")
-        .select("completed_at, reps_completed, avg_angle, form_score")
-        .eq("user_id", payload.user_id)
-        .eq("exercise_id", payload.exercise_id)
-        .neq("id", session_id)
-        .order("completed_at", desc=True)
-        .limit(5)
-        .execute()
-    )
+    try:
+        history_response = (
+            supabase.table("exercise_sessions")
+            .select(
+                "completed_at, reps_completed, avg_angle, form_score, progressive_score, max_angle"
+            )
+            .eq("user_id", payload.user_id)
+            .eq("exercise_id", payload.exercise_id)
+            .neq("id", session_id)
+            .order("completed_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+    except Exception:
+        history_response = (
+            supabase.table("exercise_sessions")
+            .select("completed_at, reps_completed, avg_angle, form_score")
+            .eq("user_id", payload.user_id)
+            .eq("exercise_id", payload.exercise_id)
+            .neq("id", session_id)
+            .order("completed_at", desc=True)
+            .limit(5)
+            .execute()
+        )
     history = history_response.data or []
 
     # Call Gemini — always returns something (fallback on failure)
@@ -134,6 +259,17 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
 
     threading.Thread(target=_bg_report, daemon=True).start()
 
+    progress = None
+    if previous_score is not None:
+        if payload.score is not None:
+            current_score = payload.score
+        else:
+            current_score = _score_int_from_form_score(payload.form_score)
+        if current_score is not None:
+            progress = SessionProgressComparison(
+                **compare_sessions(current_score, previous_score)
+            )
+
     return SessionCreateResponse(
         id=session_record["id"],
         user_id=session_record["user_id"],
@@ -147,6 +283,7 @@ def create_session(payload: SessionCreate) -> SessionCreateResponse:
         started_at=session_record["started_at"],
         completed_at=session_record["completed_at"],
         feedback_id=feedback_id,
+        progress=progress,
     )
 
 
@@ -206,15 +343,30 @@ def list_sessions(user_id: str, limit: int = 20, offset: int = 0) -> SessionList
     )
     total = count_response.count or 0
 
-    # Paginated rows
-    rows_response = (
-        supabase.table("exercise_sessions")
-        .select("id, exercise_id, reps_completed, form_score, duration_seconds, completed_at")
-        .eq("user_id", user_id)
-        .order("completed_at", desc=True)
-        .range(offset, offset + limit - 1)
-        .execute()
-    )
+    # Paginated rows (progressive_* optional columns — fallback select if not migrated)
+    try:
+        rows_response = (
+            supabase.table("exercise_sessions")
+            .select(
+                "id, exercise_id, reps_completed, form_score, duration_seconds, completed_at, progressive_score, progressive_quality"
+            )
+            .eq("user_id", user_id)
+            .order("completed_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("list_sessions progressive columns missing, using legacy select: %s", exc)
+        rows_response = (
+            supabase.table("exercise_sessions")
+            .select(
+                "id, exercise_id, reps_completed, form_score, duration_seconds, completed_at"
+            )
+            .eq("user_id", user_id)
+            .order("completed_at", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
     rows = rows_response.data or []
 
     # Bulk resolve exercise names
@@ -237,6 +389,8 @@ def list_sessions(user_id: str, limit: int = 20, offset: int = 0) -> SessionList
             form_score=r.get("form_score"),
             duration_seconds=r.get("duration_seconds"),
             completed_at=r["completed_at"],
+            progressive_score=r.get("progressive_score"),
+            progressive_quality=r.get("progressive_quality"),
         )
         for r in rows
     ]
