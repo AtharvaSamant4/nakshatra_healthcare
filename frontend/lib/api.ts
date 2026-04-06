@@ -30,14 +30,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   let res: Response | undefined
   let lastNetworkError: unknown
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Render free tier sleeping cold starts take 30-50 seconds. 
+  // We retry up to 6 times with exponential backoff (up to ~60s total) 
+  // to completely mask the "CORS error" & 503s from the user.
+  for (let attempt = 0; attempt < 6; attempt++) {
     try {
       res = await fetch(url, init)
+      // Render proxy returns 502/503 HTML pages (no CORS headers) while waking up.
+      if (res.status === 502 || res.status === 503 || res.status === 500) {
+        throw new Error(`Render cold start (status ${res.status})`)
+      }
       break
     } catch (error) {
       lastNetworkError = error
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 350))
+      if (attempt < 5) {
+        // Delays: 1s, 2s, 4s, 8s, 16s (total ~31s of waiting, easily outlasts Render cold start)
+        const delay = Math.pow(2, attempt) * 1000
+        console.warn(`[API] Server sleeping or waking up. Retrying fetch to ${path} in ${delay/1000}s...`)
+        await new Promise((r) => setTimeout(r, delay))
         continue
       }
       const message =
