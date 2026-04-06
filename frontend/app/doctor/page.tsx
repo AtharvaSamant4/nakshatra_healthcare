@@ -7,9 +7,9 @@ import { AppLayout } from "@/components/app-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { patientsApi, type PatientListItem } from "@/lib/api"
+import { patientsApi, messagesApi, type PatientListItem, type MessageThread } from "@/lib/api"
 import { useApp } from "@/lib/app-context"
-import { Users, Search, ChevronRight } from "lucide-react"
+import { Users, Search, ChevronRight, MessageCircle } from "lucide-react"
 
 const STATUS_COLORS: Record<string, string> = {
   registered: "bg-muted text-muted-foreground",
@@ -25,6 +25,7 @@ export default function DoctorDashboard() {
   const [allPatients, setAllPatients] = useState<PatientListItem[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
+  const [unreadByPatient, setUnreadByPatient] = useState<Record<string, number>>({})
 
   const currentDoctorId = identity?.id ?? ""
 
@@ -50,6 +51,37 @@ export default function DoctorDashboard() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [role, identity, router, currentDoctorId])
+
+  // Poll for new messages every 5 seconds
+  useEffect(() => {
+    if (allPatients.length === 0) return
+
+    const pollMessages = async () => {
+      const newUnread: Record<string, number> = {}
+      for (const patient of allPatients) {
+        try {
+          const thread = await messagesApi.getThread(patient.id, 20)
+          // Count unread messages from patient (sender_type: 'patient' and not read by doctor)
+          const patientMessages = thread.messages.filter((m) => m.sender_type === "patient")
+          // For now, count messages from last hour as "unread"
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+          const unreadCount = patientMessages.filter(
+            (m) => new Date(m.created_at) > oneHourAgo
+          ).length
+          if (unreadCount > 0) {
+            newUnread[patient.id] = unreadCount
+          }
+        } catch (err) {
+          console.error(`Failed to fetch messages for patient ${patient.id}:`, err)
+        }
+      }
+      setUnreadByPatient(newUnread)
+    }
+
+    const interval = setInterval(pollMessages, 5000)
+    pollMessages() // Initial call
+    return () => clearInterval(interval)
+  }, [allPatients])
 
   const displayPatients = useMemo(() => {
     const filteredPatients = allPatients.filter(
@@ -142,6 +174,12 @@ export default function DoctorDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {unreadByPatient[patient.id] && (
+                        <Badge className="flex items-center gap-1 bg-blue-500 hover:bg-blue-600">
+                          <MessageCircle className="h-3 w-3" />
+                          {unreadByPatient[patient.id]}
+                        </Badge>
+                      )}
                       {patient.has_alert && (
                         <Badge variant="destructive" className="bg-red-500 hover:bg-red-600">
                           High Risk Alert

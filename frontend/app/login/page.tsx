@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/lib/app-context"
-import { authApi } from "@/lib/api"
+import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,29 +24,31 @@ export default function LoginPage() {
     setError("")
 
     try {
-      const res = await authApi.login({ email, password })
-      if (res.role === "patient") {
-        setSession("patient", { 
-          id: res.user.id, 
-          name: res.user.name, 
-          status: res.user.status, 
-          doctor_id: res.user.doctor_id 
-        })
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (authError) throw authError
+
+      if (!data.session?.user.user_metadata) {
+        throw new Error("User metadata missing")
+      }
+
+      const role = data.session.user.user_metadata.role
+      const id = data.session.user.user_metadata.id
+      const name = data.session.user.user_metadata.name
+
+      // Navigation is now handled by the global listener in app-context, 
+      // but we force a quick router push for immediate UX speed.
+      if (role === "patient") {
+        setSession("patient", { id, name, status: "active" })
         router.push("/patient")
-      } else if (res.role === "doctor") {
-        setSession("doctor", { 
-          id: res.user.id, 
-          name: res.user.name, 
-          role: "doctor", 
-          specialization: res.user.specialization 
-        })
+      } else if (role === "doctor") {
+        setSession("doctor", { id, name, role: "doctor" })
         router.push("/doctor")
-      } else if (res.role === "receptionist") {
-        setSession("receptionist", { 
-          id: res.user.id, 
-          name: res.user.name, 
-          role: "receptionist" 
-        })
+      } else {
+        setSession("receptionist", { id, name, role: "receptionist" })
         router.push("/reception")
       }
     } catch (err: any) {

@@ -1,3 +1,5 @@
+import { supabase } from "./supabase"
+
 // All backend API calls go through this file.
 // If NEXT_PUBLIC_API_URL is unset or empty, requests use same-origin "/api/*"
 // and Next.js proxies to FastAPI (see next.config.mjs rewrites + BACKEND_URL).
@@ -8,9 +10,22 @@ const BASE = trimmedBase ? trimmedBase.replace(/\/$/, "") : ""
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE}${path}`
+  
+  // Automatically inject the Supabase JWT into every backend request
+  const { data: { session } } = await supabase.auth.getSession()
+  
+  const headers: Record<string, string> = { 
+    "Content-Type": "application/json",
+    ...((options?.headers as Record<string, string>) || {})
+  }
+  
+  if (session?.access_token) {
+    headers["Authorization"] = `Bearer ${session.access_token}`
+  }
+
   const init: RequestInit = {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   }
 
   let res: Response | undefined

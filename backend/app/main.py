@@ -7,6 +7,8 @@ from app.routers import users, exercises, sessions, games, progress, feedback, c
 from app.routers import staff, patients, prescriptions, messages, ai
 from app.routers import auth
 from app.routers import plan
+from fastapi.exceptions import RequestValidationError
+from postgrest.exceptions import APIError
 
 app = FastAPI(title="Nakshatra Healthcare API", version="1.0.0")
 
@@ -51,7 +53,18 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    # Only fires for truly unexpected errors — HTTPException is handled above
+    if isinstance(exc, RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors(), "status_code": 422},
+        )
+    if isinstance(exc, APIError):
+        # Supabase/Postgrest errors - like invalid UUID syntax to PostgreSQL
+        return JSONResponse(
+            status_code=400,
+            content={"detail": exc.message, "status_code": 400},
+        )
+    # Only fires for truly unexpected errors - HTTPException is handled above
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "status_code": 500},

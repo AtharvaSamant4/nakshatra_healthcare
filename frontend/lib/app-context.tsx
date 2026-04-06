@@ -42,40 +42,51 @@ const AppContext = createContext<AppContextValue>({
 
 const STORAGE_KEY = "rehab_v2_session"
 
+import { supabase } from "./supabase"
 export function AppProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>(null)
   const [identity, setIdentity] = useState<Identity>(null)
   const [sessionRestored, setSessionRestored] = useState(false)
 
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY)
-      if (saved) {
-        const { role: r, identity: i } = JSON.parse(saved)
-        setRole(r)
-        setIdentity(i)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && session.user.user_metadata) {
+        setRole(session.user.user_metadata.role as Role)
+        setIdentity({
+          id: session.user.user_metadata.id,
+          name: session.user.user_metadata.name,
+          role: session.user.user_metadata.role
+        } as Identity)
       }
-    } catch {
-      // sessionStorage unavailable — proceed without restore
-    } finally {
       setSessionRestored(true)
-    }
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        setRole(null)
+        setIdentity(null)
+      } else if (session && session.user.user_metadata) {
+        setRole(session.user.user_metadata.role as Role)
+        setIdentity({
+          id: session.user.user_metadata.id,
+          name: session.user.user_metadata.name,
+          role: session.user.user_metadata.role
+        } as Identity)
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const setSession = (r: Role, i: Identity) => {
     setRole(r)
     setIdentity(i)
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ role: r, identity: i }))
-    } catch {}
   }
 
-  const clearSession = () => {
+  const clearSession = async () => {
+    await supabase.auth.signOut()
     setRole(null)
     setIdentity(null)
-    try {
-      sessionStorage.removeItem(STORAGE_KEY)
-    } catch {}
   }
 
   const selectedUserId = role === "patient" && identity ? identity.id : null
@@ -92,3 +103,4 @@ export function AppProvider({ children }: { children: ReactNode }) {
 export function useApp() {
   return useContext(AppContext)
 }
+

@@ -1,19 +1,10 @@
 /** @type {import('next').NextConfig} */
-const backend =
-  (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "")
-
 const nextConfig = {
+  output: 'export',
   typescript:
  { ignoreBuildErrors: true },
   images: { unoptimized: true },
-  serverExternalPackages: ['jspdf'],
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${backend}/api/:path*`,
-      },
-    ]
-  },
+  serverExternalPackages: ['jspdf', '@supabase/supabase-js'],
+  turbopack: {}
 };
 export default nextConfig;
