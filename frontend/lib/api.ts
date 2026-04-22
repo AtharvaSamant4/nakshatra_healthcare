@@ -8,22 +8,6 @@ import { supabase } from "./supabase"
 const trimmedBase = process.env.NEXT_PUBLIC_API_URL?.trim()
 const BASE = trimmedBase ? trimmedBase.replace(/\/$/, "") : ""
 
-export function normalizeUserId(id: string | undefined | null): string {
-  if (!id) return ""
-  return id.replace(/^[pdr]/i, "0")
-}
-
-function normalizePayload(payload: any): any {
-  if (!payload || typeof payload !== 'object') return payload;
-  const clone = { ...payload };
-  for (const key of Object.keys(clone)) {
-     if (key.endsWith('id') && typeof clone[key] === 'string') {
-        clone[key] = normalizeUserId(clone[key]);
-     }
-  }
-  return clone;
-}
-
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE}${path}`
   
@@ -55,10 +39,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       // Render proxy returns 502/503 HTML pages (no CORS headers) while waking up.
       if (res.status === 502 || res.status === 503 || res.status === 500) {
         throw new Error(`Render cold start (status ${res.status})`)
-      }
-      if (res.status === 422) {
-        console.error("Invalid UUID sent to backend:", url, init.body)
-        break // Stop retrying on 422
       }
       break
     } catch (error) {
@@ -490,9 +470,9 @@ export const usersApi = {
       ]
     }
   },
-  get: (id: string) => request<User>(`/api/users/${normalizeUserId(id)}`),
+  get: (id: string) => request<User>(`/api/users/${id}`),
   create: (payload: { name: string; email?: string; age?: number; condition_notes?: string }) =>
-    request<User>("/api/users", { method: "POST", body: JSON.stringify(normalizePayload(payload)) }),
+    request<User>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
 }
 
 // ─── Exercises ────────────────────────────────────────────────────────────────
@@ -521,7 +501,7 @@ export const exercisesApi = {
       return matchesBodyPart && matchesDifficulty
     })
   },
-  get: (id: string) => request<Exercise>(`/api/exercises/${normalizeUserId(id)}`),
+  get: (id: string) => request<Exercise>(`/api/exercises/${id}`),
 }
 
 // ─── Exercise Sessions ────────────────────────────────────────────────────────
@@ -530,11 +510,11 @@ export const sessionsApi = {
   create: (payload: CreateSessionPayload) =>
     request<SessionCreateResponse>("/api/sessions", {
       method: "POST",
-      body: JSON.stringify(normalizePayload(payload)),
+      body: JSON.stringify(payload),
     }),
   list: (user_id: string, limit = 20, offset = 0) =>
     request<SessionListResponse>(
-      `/api/sessions?user_id=${normalizeUserId(user_id)}&limit=${limit}&offset=${offset}`
+      `/api/sessions?user_id=${user_id}&limit=${limit}&offset=${offset}`
     ),
 }
 
@@ -549,10 +529,10 @@ export const gameSessionsApi = {
   create: (payload: CreateGameSessionPayload) =>
     request<GameSessionCreateResponse>("/api/game-sessions", {
       method: "POST",
-      body: JSON.stringify(normalizePayload(payload)),
+      body: JSON.stringify(payload),
     }),
   list: (user_id: string, game_type?: string, limit = 20) => {
-    const qs = new URLSearchParams({ user_id: normalizeUserId(user_id) })
+    const qs = new URLSearchParams({ user_id })
     if (game_type) qs.set("game_type", game_type)
     qs.set("limit", String(limit))
     return requestWithFallback<GameSessionListResponse>(
@@ -572,7 +552,7 @@ export const feedbackApi = {
     session_type: "exercise" | "game" | "cognitive_test"
   ): Promise<FeedbackResponse | FeedbackProcessing> => {
     const res = await fetch(
-      `${BASE}/api/feedback/${normalizeUserId(session_id)}?session_type=${session_type}`,
+      `${BASE}/api/feedback/${session_id}?session_type=${session_type}`,
       { headers: { "Content-Type": "application/json" } }
     )
     if (res.status === 202) return res.json() as Promise<FeedbackProcessing>
@@ -589,7 +569,7 @@ export const feedbackApi = {
 export const progressApi = {
   get: (user_id: string) =>
     requestWithFallback<ProgressResponse>(
-      `/api/progress/${normalizeUserId(user_id)}`,
+      `/api/progress/${user_id}`,
       {
         user_id,
         summary: {
@@ -611,14 +591,14 @@ export const progressApi = {
     const qs = new URLSearchParams({ days: String(days) })
     if (exercise_id) qs.set("exercise_id", exercise_id)
     return requestWithFallback<ExerciseTrendResponse>(
-      `/api/progress/${normalizeUserId(user_id)}/exercise-trend?${qs}`,
+      `/api/progress/${user_id}/exercise-trend?${qs}`,
       { trend: [] },
       "Exercise trend API"
     )
   },
   improvement: (user_id: string) =>
     requestWithFallback<{ improvement: number | null }>(
-      `/api/progress/${normalizeUserId(user_id)}/improvement`,
+      `/api/progress/${user_id}/improvement`,
       { improvement: null },
       "Improvement API"
     ),
@@ -703,10 +683,10 @@ export const cognitiveTestsApi = {
   create: (payload: CreateCognitiveTestPayload) =>
     request<CognitiveTestCreateResponse>("/api/cognitive-tests", {
       method: "POST",
-      body: JSON.stringify(normalizePayload(payload)),
+      body: JSON.stringify(payload),
     }),
   list: (user_id: string, test_type?: string, limit = 20) => {
-    const qs = new URLSearchParams({ user_id: normalizeUserId(user_id) })
+    const qs = new URLSearchParams({ user_id })
     if (test_type) qs.set("test_type", test_type)
     qs.set("limit", String(limit))
     return requestWithFallback<CognitiveTestListResponse>(
@@ -718,7 +698,7 @@ export const cognitiveTestsApi = {
   evaluate: (payload: EvaluateResponsePayload) =>
     request<EvaluateResponseResult>("/api/cognitive-tests/evaluate", {
       method: "POST",
-      body: JSON.stringify(normalizePayload(payload)),
+      body: JSON.stringify(payload),
     }),
 }
 
@@ -883,9 +863,9 @@ export const staffApi = {
     const qs = role ? `?role=${role}` : ""
     return requestWithFallback<StaffListItem[]>(`/api/staff${qs}`, [], "Staff API")
   },
-  get: (id: string) => request<StaffListItem>(`/api/staff/${normalizeUserId(id)}`),
+  get: (id: string) => request<StaffListItem>(`/api/staff/${id}`),
   create: (payload: { name: string; email?: string; role: string; specialization?: string }) =>
-    request<StaffListItem>("/api/staff", { method: "POST", body: JSON.stringify(normalizePayload(payload)) }),
+    request<StaffListItem>("/api/staff", { method: "POST", body: JSON.stringify(payload) }),
 }
 
 // ─── Patients ─────────────────────────────────────────────────────────────────
@@ -898,7 +878,7 @@ export const patientsApi = {
     const query = qs.toString() ? `?${qs}` : ""
     return requestWithFallback<PatientListItem[]>(`/api/patients${query}`, [], "Patients API")
   },
-  get: (id: string) => request<Patient>(`/api/patients/${normalizeUserId(id)}`),
+  get: (id: string) => request<Patient>(`/api/patients/${id}`),
   create: (payload: {
     name: string
     age?: number
@@ -907,9 +887,9 @@ export const patientsApi = {
     doctor_id?: string
     emergency?: boolean
     condition_notes?: string
-  }) => request<PatientCreateResponse>("/api/patients", { method: "POST", body: JSON.stringify(normalizePayload(payload)) }),
+  }) => request<PatientCreateResponse>("/api/patients", { method: "POST", body: JSON.stringify(payload) }),
   update: (id: string, payload: Partial<Patient>) =>
-    request<Patient>(`/api/patients/${normalizeUserId(id)}`, { method: "PATCH", body: JSON.stringify(normalizePayload(payload)) }),
+    request<Patient>(`/api/patients/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 }
 
 // ─── Prescriptions ────────────────────────────────────────────────────────────
@@ -917,7 +897,7 @@ export const patientsApi = {
 export const prescriptionsApi = {
   list: (patient_id: string) =>
     requestWithFallback<Prescription[]>(
-      `/api/prescriptions?patient_id=${normalizeUserId(patient_id)}`,
+      `/api/prescriptions?patient_id=${patient_id}`,
       [],
       "Prescriptions API"
     ),
@@ -931,9 +911,9 @@ export const prescriptionsApi = {
     frequency?: string
     priority?: string
     notes?: string
-  }) => request<Prescription>("/api/prescriptions", { method: "POST", body: JSON.stringify(normalizePayload(payload)) }),
+  }) => request<Prescription>("/api/prescriptions", { method: "POST", body: JSON.stringify(payload) }),
   update: (id: string, payload: Partial<Prescription>) =>
-    request<Prescription>(`/api/prescriptions/${normalizeUserId(id)}`, { method: "PATCH", body: JSON.stringify(normalizePayload(payload)) }),
+    request<Prescription>(`/api/prescriptions/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 }
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
@@ -942,13 +922,13 @@ export const messagesApi = {
   // getThread is the canonical name used by message pages
   getThread: (patient_id: string, limit = 50) =>
     requestWithFallback<{ messages: Message[] }>(
-      `/api/messages?patient_id=${normalizeUserId(patient_id)}&limit=${limit}`,
+      `/api/messages?patient_id=${patient_id}&limit=${limit}`,
       { messages: [] },
       "Messages API"
     ),
   list: (patient_id: string, limit = 50) =>
     requestWithFallback<{ messages: Message[] }>(
-      `/api/messages?patient_id=${normalizeUserId(patient_id)}&limit=${limit}`,
+      `/api/messages?patient_id=${patient_id}&limit=${limit}`,
       { messages: [] },
       "Messages API"
     ),
@@ -957,7 +937,7 @@ export const messagesApi = {
     sender_type: "patient" | "doctor"
     sender_id: string
     content: string
-  }) => request<Message>("/api/messages", { method: "POST", body: JSON.stringify(normalizePayload(payload)) }),
+  }) => request<Message>("/api/messages", { method: "POST", body: JSON.stringify(payload) }),
 }
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
@@ -966,28 +946,28 @@ export const aiApi = {
   patientChat: (patient_id: string, message: string) =>
     request<{ response: string }>("/api/ai/patient-chat", {
       method: "POST",
-      body: JSON.stringify(normalizePayload({ patient_id, message })),
+      body: JSON.stringify({ patient_id, message }),
     }),
   doctorChat: (doctor_id: string, patient_id: string, message: string) =>
     request<{ response: string }>("/api/ai/doctor-chat", {
       method: "POST",
-      body: JSON.stringify(normalizePayload({ doctor_id, patient_id, message })),
+      body: JSON.stringify({ doctor_id, patient_id, message }),
     }),
   generateReport: (patient_id: string) =>
     request<PatientReport>("/api/ai/generate-report", {
       method: "POST",
-      body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })),
+      body: JSON.stringify({ patient_id }),
     }),
   listReports: (patient_id: string) =>
     requestWithFallback<PatientReport[]>(
-      `/api/ai/reports/${normalizeUserId(patient_id)}`,
+      `/api/ai/reports/${patient_id}`,
       [],
       "AI reports API"
     ),
   // listRecommendations matches the method name used by patient/page.tsx
   listRecommendations: (patient_id: string) =>
     requestWithFallback<RecommendationResponse[]>(
-      `/api/ai/recommendations/${normalizeUserId(patient_id)}`,
+      `/api/ai/recommendations/${patient_id}`,
       [],
       "AI recommendations API"
     ),
@@ -995,7 +975,7 @@ export const aiApi = {
   recommendPlan: (patient_id: string) =>
     request<RecommendationResponse>("/api/ai/recommend-plan", {
       method: "POST",
-      body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })),
+      body: JSON.stringify({ patient_id }),
     }),
   // recoveryPrediction matches the method name used by patient/page.tsx
   recoveryPrediction: (patient_id: string) =>
@@ -1003,28 +983,28 @@ export const aiApi = {
       "/api/ai/recovery-prediction",
       {},
       "Recovery prediction API",
-      { method: "POST", body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })) }
+      { method: "POST", body: JSON.stringify({ patient_id }) }
     ),
   adaptivePlan: (patient_id: string) =>
     requestWithFallback<AdaptivePlan>(
       "/api/ai/adaptive-plan",
       { reps: 10, sets: 3, intensity: "maintain", reason: "" },
       "Adaptive plan API",
-      { method: "POST", body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })) }
+      { method: "POST", body: JSON.stringify({ patient_id }) }
     ),
   calculateRisk: (patient_id: string) =>
     requestWithFallback<RiskAssessment>(
       "/api/ai/calculate-risk",
       { risk_level: "low", reasons: [] },
       "Risk assessment API",
-      { method: "POST", body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })) }
+      { method: "POST", body: JSON.stringify({ patient_id }) }
     ),
   recoveryScore: (patient_id: string) =>
     requestWithFallback<RecoveryScore>(
       "/api/ai/recovery-score",
       { recovery_score: 0 },
       "Recovery score API",
-      { method: "POST", body: JSON.stringify(normalizePayload({ patient_id: normalizeUserId(patient_id) })) }
+      { method: "POST", body: JSON.stringify({ patient_id }) }
     ),
 }
 

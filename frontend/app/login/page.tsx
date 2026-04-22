@@ -34,16 +34,16 @@ export default function LoginPage() {
 
         if (email === "drsmoke@test.local") {
           role = "doctor"
-          id = "d1000001-0001-4000-8000-000000000001"
+          id = "e4034668-b884-4334-aac2-dd0bd7083ee3"
           name = "Dr. Smoke"
         } else if (email === "aarav@gmail.com") {
           role = "patient"
-          id = "p1000001-0001-4000-8000-000000000001"
-          name = "Aarav"
+          id = "11111111-1111-4111-8111-111111111111"
+          name = "Aarav Sharma"
         } else if (email === "receptionist@test.local") {
           role = "receptionist"
-          id = "r1000001-0001-4000-8000-000000000001"
-          name = "Receptionist"
+          id = "d9af8818-4201-4a5a-824d-6e8d94bc6502"
+          name = "Receptionist Anita"
         }
 
         const demoSession = { email, role, isDemo: true, id, name }

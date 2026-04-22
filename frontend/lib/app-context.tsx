@@ -54,6 +54,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const parsed = JSON.parse(demoUser)
         if (parsed.isDemo) {
+          // Hotfix to silently upgrade stale mock IDs into real UUIDs and prevent 404/422 without re-login!
+          if (parsed.id === "p1000001-0001-4000-8000-000000000001" || parsed.id === "01000001-0001-4000-8000-000000000001") parsed.id = "11111111-1111-4111-8111-111111111111"; // Aarav
+          if (parsed.id === "d1000001-0001-4000-8000-000000000001" || parsed.id === "01000001-0001-4000-8000-000000000002") parsed.id = "e4034668-b884-4334-aac2-dd0bd7083ee3"; // Dr. Smoke
+          if (parsed.id === "r1000001-0001-4000-8000-000000000001" || parsed.id === "01000001-0001-4000-8000-000000000003") parsed.id = "d9af8818-4201-4a5a-824d-6e8d94bc6502"; // Receptionist
+          
           setRole(parsed.role)
           setIdentity({
             id: parsed.id,
