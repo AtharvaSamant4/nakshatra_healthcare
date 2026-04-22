@@ -856,16 +856,6 @@ export interface RecoveryScore {
   recovery_score: number
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
-
-export const authApi = {
-  login: (payload: { email: string; password: string }) =>
-    request<{ token: string; role: string; user: Patient }>(
-      "/api/auth/login",
-      { method: "POST", body: JSON.stringify(payload) }
-    ),
-}
-
 // ─── Staff ────────────────────────────────────────────────────────────────────
 
 export const staffApi = {
