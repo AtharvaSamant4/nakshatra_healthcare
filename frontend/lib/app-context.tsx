@@ -49,6 +49,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [sessionRestored, setSessionRestored] = useState(false)
 
   useEffect(() => {
+    const demoUser = localStorage.getItem("demo_user")
+    if (demoUser) {
+      try {
+        const parsed = JSON.parse(demoUser)
+        if (parsed.isDemo) {
+          setRole(parsed.role)
+          setIdentity({
+            id: parsed.id,
+            name: parsed.name,
+            role: parsed.role,
+          } as Identity)
+          setSessionRestored(true)
+          return
+        }
+      } catch (e) {
+        // ignore JSON parse err
+      }
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session && session.user.user_metadata) {
         setRole(session.user.user_metadata.role as Role)
@@ -84,6 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const clearSession = async () => {
+    localStorage.removeItem("demo_user")
     await supabase.auth.signOut()
     setRole(null)
     setIdentity(null)

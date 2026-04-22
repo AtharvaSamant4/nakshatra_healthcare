@@ -24,6 +24,44 @@ export default function LoginPage() {
     setError("")
 
     try {
+      // Demo login bypass
+      const isDemo = email === "drsmoke@test.local" || email === "aarav@gmail.com" || email === "receptionist@test.local"
+      
+      if (isDemo) {
+        let role = "patient"
+        let id = ""
+        let name = ""
+
+        if (email === "drsmoke@test.local") {
+          role = "doctor"
+          id = "d1000001-0001-4000-8000-000000000001"
+          name = "Dr. Smoke"
+        } else if (email === "aarav@gmail.com") {
+          role = "patient"
+          id = "p1000001-0001-4000-8000-000000000001"
+          name = "Aarav"
+        } else if (email === "receptionist@test.local") {
+          role = "receptionist"
+          id = "r1000001-0001-4000-8000-000000000001"
+          name = "Receptionist"
+        }
+
+        const demoSession = { email, role, isDemo: true, id, name }
+        localStorage.setItem("demo_user", JSON.stringify(demoSession))
+
+        if (role === "patient") {
+          setSession("patient", { id, name, status: "active" })
+          router.push("/patient")
+        } else if (role === "doctor") {
+          setSession("doctor", { id, name, role: "doctor" })
+          router.push("/doctor")
+        } else {
+          setSession("receptionist", { id, name, role: "receptionist" })
+          router.push("/reception")
+        }
+        return
+      }
+
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
